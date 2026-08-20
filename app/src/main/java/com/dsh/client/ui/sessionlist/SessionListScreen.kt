@@ -215,7 +215,7 @@ private fun SwipeableSessionCard(
                 Icon(
                     imageVector = when (dismissState.targetValue) {
                         SwipeToDismissBoxValue.EndToStart -> Icons.Filled.Delete
-                        SwipeToDismissBoxValue.StartToEnd -> if (isPinned) Icons.Filled.Star else Icons.Outlined.StarBorder
+                        SwipeToDismissBoxValue.StartToEnd -> if (isPinned) Icons.Filled.Star else Icons.Outlined.Star
                         else -> Icons.Filled.Delete
                     },
                     contentDescription = null,
@@ -243,7 +243,7 @@ private fun SwipeableSessionCard(
                     text = { Text(if (isPinned) "取消置顶" else "置顶") },
                     onClick = { showMenu = false; onPin() },
                     leadingIcon = {
-                        Icon(if (isPinned) Icons.Filled.Star else Icons.Outlined.StarBorder, contentDescription = null)
+                        Icon(if (isPinned) Icons.Filled.Star else Icons.Outlined.Star, contentDescription = null)
                     }
                 )
                 DropdownMenuItem(

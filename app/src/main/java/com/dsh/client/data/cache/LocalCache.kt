@@ -3,7 +3,6 @@ package com.dsh.client.data.cache
 import android.content.Context
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.builtins.listSerializer
 import kotlinx.serialization.json.Json
 import java.io.File
 
@@ -31,6 +30,16 @@ object LocalCache {
     )
 
     @Serializable
+    data class SessionList(
+        @SerialName("items") val items: List<SessionCache> = emptyList()
+    )
+
+    @Serializable
+    data class MessageCacheList(
+        @SerialName("items") val items: List<MessageCache> = emptyList()
+    )
+
+    @Serializable
     data class MessageCache(
         @SerialName("id") val id: String,
         @SerialName("role") val role: String,
@@ -43,26 +52,26 @@ object LocalCache {
         val file = sessionsFile() ?: return emptyList()
         if (!file.exists()) return emptyList()
         return try {
-            json.decodeFromString(listSerializer(SessionCache.serializer()), file.readText())
+            json.decodeFromString<SessionList>(file.readText()).items
         } catch (_: Exception) { emptyList() }
     }
 
     fun saveSessions(sessions: List<SessionCache>) {
         val file = sessionsFile() ?: return
-        try { file.writeText(json.encodeToString(listSerializer(SessionCache.serializer()), sessions)) } catch (_: Exception) { }
+        try { file.writeText(json.encodeToString(SessionList(sessions))) } catch (_: Exception) { }
     }
 
     fun loadMessages(sessionId: String): List<MessageCache> {
         val file = messagesFile(sessionId) ?: return emptyList()
         if (!file.exists()) return emptyList()
         return try {
-            json.decodeFromString(listSerializer(MessageCache.serializer()), file.readText())
+            json.decodeFromString<MessageCacheList>(file.readText()).items
         } catch (_: Exception) { emptyList() }
     }
 
     fun saveMessages(sessionId: String, messages: List<MessageCache>) {
         val file = messagesFile(sessionId) ?: return
-        try { file.writeText(json.encodeToString(listSerializer(MessageCache.serializer()), messages)) } catch (_: Exception) { }
+        try { file.writeText(json.encodeToString(MessageCacheList(messages))) } catch (_: Exception) { }
     }
 
     fun clearAll() {
