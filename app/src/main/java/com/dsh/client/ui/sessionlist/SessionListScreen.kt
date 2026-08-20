@@ -39,28 +39,65 @@ fun SessionListScreen(
     val apiProvider = remember { com.dsh.client.DshApp.api }
     apiProvider?.let { viewModel.setApi(it) }
 
+    var isSearching by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+    val searchResults by viewModel.searchResults.collectAsState()
+
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("DSH", fontWeight = FontWeight.Bold)
-                        if (uiState.isConnected) {
-                            Spacer(Modifier.width(8.dp))
-                            Box(
-                                Modifier
-                                    .size(8.dp)
-                                    .clip(CircleShape)
-                                    .background(Online)
-                            )
+            if (isSearching) {
+                // Search bar
+                TopAppBar(
+                    title = {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it; viewModel.onSearchQueryChanged(it) },
+                            placeholder = { Text("搜索会话...") },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
+                            textStyle = MaterialTheme.typography.bodyMedium
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = { isSearching = false; viewModel.clearSearch(); searchQuery = "" }) {
+                            Icon(Icons.Filled.ArrowBack, contentDescription = "关闭搜索")
                         }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                    titleContentColor = MaterialTheme.colorScheme.onBackground,
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.background,
+                    )
                 )
-            )
+            } else {
+                TopAppBar(
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("DSH", fontWeight = FontWeight.Bold)
+                            if (uiState.isConnected) {
+                                Spacer(Modifier.width(8.dp))
+                                Box(
+                                    Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(Online)
+                                )
+                            }
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { isSearching = true }) {
+                            Icon(Icons.Filled.Search, contentDescription = "搜索")
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.background,
+                        titleContentColor = MaterialTheme.colorScheme.onBackground,
+                    )
+                )
+            }
         },
         floatingActionButton = {
             FloatingActionButton(
@@ -129,6 +166,21 @@ fun SessionListScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    }
+                }
+                isSearching && searchResults.isNotEmpty() -> {
+                    // Search results
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(searchResults, key = { it.sessionId }) { session ->
+                            SessionCard(
+                                session = session,
+                                onClick = { onSessionClick(session.sessionId) },
+                            )
+                        }
                     }
                 }
                 else -> {

@@ -6,6 +6,7 @@ import com.dsh.client.data.api.DshApi
 import com.dsh.client.data.cache.LocalCache
 import com.dsh.client.data.api.RpcModels
 import com.dsh.client.domain.model.SessionSummary
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -57,6 +58,48 @@ class SessionListViewModel : ViewModel() {
                 }
             }
         }
+    }
+
+    // ── Search ────────────────────────────────────────────────────────────────
+    private val _searchQuery = MutableStateFlow("")
+    private val _searchResults = MutableStateFlow<List<SessionSummary>>(emptyList())
+    val searchResults: StateFlow<List<SessionSummary>> = _searchResults.asStateFlow()
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+    private var searchJob: kotlinx.coroutines.Job? = null
+
+    fun onSearchQueryChanged(query: String) {
+        _searchQuery.value = query
+        searchJob?.cancel()
+        if (query.isBlank()) {
+            _searchResults.value = emptyList()
+            return
+        }
+        searchJob = viewModelScope.launch {
+            kotlinx.coroutines.delay(300) // debounce
+            try {
+                val results = api?.searchSessions(query) ?: emptyList()
+                // Map results to SessionSummary (enrich with local data)
+                val allSessions = _uiState.value.sessions
+                _searchResults.value = results.mapNotNull { r ->
+                    val existing = allSessions.find { it.sessionId == r.sessionId }
+                    existing?.copy(lastMessagePreview = r.snippet)
+                        ?: SessionSummary(
+                            sessionId = r.sessionId,
+                            title = "搜索结果",
+                            updatedAt = 0,
+                            running = false,
+                            blank = false,
+                            lastMessagePreview = r.snippet.take(80)
+                        )
+                }
+            } catch (_: Exception) { }
+        }
+    }
+
+    fun clearSearch() {
+        _searchQuery.value = ""
+        _searchResults.value = emptyList()
+        searchJob?.cancel()
     }
 
     fun createSession(callback: (String) -> Unit) {

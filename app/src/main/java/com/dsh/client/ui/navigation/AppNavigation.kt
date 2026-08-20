@@ -15,9 +15,12 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import android.content.Context
+import com.dsh.client.ui.onboarding.OnboardingScreen
 import com.dsh.client.ui.sessionlist.SessionListScreen
 import com.dsh.client.ui.chat.ChatScreen
 import com.dsh.client.ui.settings.SettingsScreen
+import com.dsh.client.ui.chat.ChatScreen
 
 sealed class Screen(val route: String, val title: String, val icon: ImageVector, val iconFilled: ImageVector) {
     data object Sessions : Screen("sessions", "首页", Icons.Outlined.Home, Icons.Filled.Home)
@@ -32,6 +35,20 @@ val bottomNavItems = listOf(Screen.Sessions, Screen.Chat, Screen.Settings)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppNavigation() {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("dsh_settings", Context.MODE_PRIVATE) }
+    var showOnboarding by remember { mutableStateOf(prefs.getBoolean("onboarding_done", false)) }
+
+    if (!showOnboarding) {
+        OnboardingScreen(
+            onComplete = {
+                prefs.edit().putBoolean("onboarding_done", true).apply()
+                showOnboarding = true
+            }
+        )
+        return
+    }
+
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination

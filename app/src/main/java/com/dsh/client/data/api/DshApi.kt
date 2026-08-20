@@ -131,6 +131,18 @@ class DshApi(
         rpcClient.callUnit("session.rename", payload)
     }
 
+    // ── Search ────────────────────────────────────────────────────────────────
+
+    /**
+     * Search sessions by query text.
+     * RPC: session.search
+     */
+    suspend fun searchSessions(query: String): List<SessionSearchResult> {
+        val payload = buildJsonObject { put("query", query) }
+        val response = rpcClient.call<SessionSearchWire>("session.search", payload)
+        return response.items.map { SessionSearchResult(it.sessionId, it.snippet) }
+    }
+
     // ── Event stream ────────────────────────────────────────────────────────
 
     /**
@@ -142,7 +154,27 @@ class DshApi(
 
 // ── Wire DTOs (private to this file) ────────────────────────────────────────
 
+/** session.search response wire shape. */
+@Serializable
+private data class SessionSearchWire(
+    @SerialName("items") val items: List<SessionSearchItemWire>,
+    @SerialName("hasMore") val hasMore: Boolean = false
+)
+
+@Serializable
+private data class SessionSearchItemWire(
+    @SerialName("sessionId") val sessionId: String,
+    @SerialName("snippet") val snippet: String
+)
+
+/** Result of a session.search call. */
+data class SessionSearchResult(
+    val sessionId: String,
+    val snippet: String,
+)
+
 /** session.list response wire shape. */
+
 @Serializable
 private data class SessionListWire(
     @SerialName("items") val items: List<SessionSummaryWire>
