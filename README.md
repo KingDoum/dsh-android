@@ -24,3 +24,12 @@ export ANDROID_HOME=/path/to/android/sdk
 ```
 
 APK 路径：`app/build/outputs/apk/debug/app-debug.apk`
+
+## 📚 开发文档（新话题先读这些）
+
+- **架构文档.md** — 项目结构、DSH RPC 协议、数据流、技术决策
+- **开发文档.md** — 开发环境、当前状态、下一步计划（P0-P2）、开发规范、踩坑记录
+- **ui-design-research.md** — 15+ 开源项目 UI 设计调研
+- **code-review-round1/2.md** — 两轮代码审查记录
+
+> 新话题开始干 DSH Android 客户端的活之前，必须先读 `架构文档.md` 和 `开发文档.md`。
