@@ -48,6 +48,9 @@ class DshApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        com.dsh.client.data.debug.DebugLog.init(this)
+        com.dsh.client.data.debug.DebugLog.installCrashHandler()
+        com.dsh.client.data.debug.DebugLog.i("App", "DSH Android 客户端启动")
         LocalCache.init(this)
         val prefs = getSharedPreferences("dsh_settings", MODE_PRIVATE)
         serverUrl = prefs.getString("server_url", "https://dsh.113096.xyz:4443") ?: "https://dsh.113096.xyz:4443"

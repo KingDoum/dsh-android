@@ -223,7 +223,14 @@ private fun AppNavHost(
             )
         }
         composable(Screen.Settings.route) {
-            SettingsScreen()
+            SettingsScreen(
+                onOpenLogs = { navController.navigate("logs") }
+            )
+        }
+        composable("logs") {
+            com.dsh.client.ui.debug.LogScreen(
+                onBack = { navController.popBackStack() }
+            )
         }
     }
 }

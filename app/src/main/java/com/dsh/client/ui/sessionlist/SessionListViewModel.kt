@@ -48,6 +48,7 @@ class SessionListViewModel : ViewModel() {
                 LocalCache.saveSessions(sessions.map { it.toCache() })
                 _uiState.update { it.copy(sessions = applyLocalModifiers(sessions), isLoading = false, isConnected = true) }
             } catch (e: Exception) {
+                com.dsh.client.data.debug.DebugLog.e("Sessions", "loadSessions failed: ${e.message}")
                 // Try cache
                 val cached = LocalCache.loadSessions()
                 if (cached.isNotEmpty()) {
@@ -110,6 +111,7 @@ class SessionListViewModel : ViewModel() {
                     callback(result.sessionId)
                 }
             } catch (e: Exception) {
+                com.dsh.client.data.debug.DebugLog.e("Sessions", "createSession failed: ${e.message}")
                 _uiState.update { it.copy(error = e.message) }
             }
         }

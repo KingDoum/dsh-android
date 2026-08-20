@@ -104,15 +104,19 @@ class DshEventClient(
             val url = "$effectiveBase/events.mux"
             val request = Request.Builder().url(url).build()
             // connectOnce 挂起直到连接建立或失败；连接成功后继续挂起直到断线
+            com.dsh.client.data.debug.DebugLog.d("WS", "connecting $url")
             val connected = connectOnce(request)
             if (!connected && !shouldReconnect.get()) break
             if (connected) {
                 attempt = 0
+                com.dsh.client.data.debug.DebugLog.i("WS", "connected (attempt=$attempt)")
                 isConnected.set(true)
                 // 等待断线（connectOnce 在 onClosed/onFailure 时返回）
+                com.dsh.client.data.debug.DebugLog.d("WS", "disconnected, scheduling reconnect")
                 if (!shouldReconnect.get()) break
                 delay(calculateBackoff(attempt))
             } else {
+                com.dsh.client.data.debug.DebugLog.w("WS", "connect failed, retry in ${calculateBackoff(attempt)}ms")
                 if (shouldReconnect.get()) delay(calculateBackoff(attempt))
             }
         }
@@ -130,7 +134,16 @@ class DshEventClient(
                     opened.set(true)
                 }
                 override fun onMessage(webSocket: WebSocket, text: String) {
-                    try { parseFrame(text)?.let { _frames.tryEmit(it) } } catch (_: Exception) {}
+                    try {
+                        val frame = parseFrame(text)
+                        if (frame == null) {
+                            com.dsh.client.data.debug.DebugLog.w("WS", "unparsed frame: ${text.take(200)}")
+                        } else {
+                            _frames.tryEmit(frame)
+                        }
+                    } catch (e: Exception) {
+                        com.dsh.client.data.debug.DebugLog.e("WS", "frame parse error: ${e.message}: ${text.take(200)}")
+                    }
                 }
                 override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
                     webSocket.close(1000, "client closing")

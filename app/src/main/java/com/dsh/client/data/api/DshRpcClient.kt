@@ -47,6 +47,7 @@ class DshRpcClient(
         payload: JsonElement? = null
     ): T = withContext(Dispatchers.IO) {
         val rpcId = UUID.randomUUID().toString()
+        com.dsh.client.data.debug.DebugLog.d("RPC", "-> $method rpcId=$rpcId")
         // 服务端要求 payload 字段必填且为 object：null 会被序列化省略（encodeDefaults=false）
         val effectivePayload = payload ?: buildJsonObject { }
         val requestBody = RpcModels.RpcRequest(
@@ -81,6 +82,12 @@ class DshRpcClient(
 
         val serverResponse = json.decodeFromString<RpcModels.RpcResponse>(responseBody)
         val result = serverResponse.result
+        if (!result.ok) {
+            val err = result.error
+            com.dsh.client.data.debug.DebugLog.e("RPC", "$method failed: ${err?.code} ${err?.message}")
+        } else {
+            com.dsh.client.data.debug.DebugLog.d("RPC", "<- $method ok")
+        }
 
         if (result.ok) {
             val value = result.value

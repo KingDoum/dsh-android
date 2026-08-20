@@ -65,6 +65,7 @@ class ChatViewModel : ViewModel() {
                 LocalCache.saveMessages(sessionId, messages.map { it.toCache() })
                 _uiState.update { it.copy(messages = messages, isLoading = false) }
             } catch (e: Exception) {
+                com.dsh.client.data.debug.DebugLog.e("Chat", "loadHistory failed: ${e.message}")
                 // Try cache
                 val cached = LocalCache.loadMessages(sessionId)
                 if (cached.isNotEmpty()) {
@@ -95,6 +96,7 @@ class ChatViewModel : ViewModel() {
             try {
                 api?.sendMessage(sessionId, content)
             } catch (e: Exception) {
+                com.dsh.client.data.debug.DebugLog.e("Chat", "sendMessage failed: ${e.message}")
                 _pendingReplacements.remove(tempId)
                 _uiState.update { it.copy(error = e.message ?: "发送失败", isSending = false) }
             }
