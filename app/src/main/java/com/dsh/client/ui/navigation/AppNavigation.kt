@@ -38,6 +38,13 @@ fun AppNavigation() {
 
     val isChatScreen = currentDestination?.route == Screen.Chat.route
     val isMainScreen = !isChatScreen
+    // Track active session for bottom nav Chat tab
+    var activeSessionId by remember { mutableStateOf<String?>(null) }
+    // Update activeSessionId when entering/leaving chat
+    LaunchedEffect(currentDestination?.route) {
+        val route = currentDestination?.route
+        if (route == Screen.Sessions.route) activeSessionId = null
+    }
 
     Scaffold(
         bottomBar = {
@@ -58,6 +65,18 @@ fun AppNavigation() {
                             label = { Text(screen.title) },
                             selected = selected,
                             onClick = {
+                                // Chat tab only navigates when a session is active
+                                if (screen.route == Screen.Chat.route) {
+                                    if (activeSessionId == null) return@NavigationBarItem
+                                    navController.navigate(Screen.Chat.createRoute(activeSessionId)) {
+                                        popUpTo(navController.graph.findStartDestination().id) {
+                                            saveState = true
+                                        }
+                                        launchSingleTop = true
+                                        restoreState = true
+                                    }
+                                    return@NavigationBarItem
+                                }
                                 navController.navigate(screen.route) {
                                     popUpTo(navController.graph.findStartDestination().id) {
                                         saveState = true
@@ -85,9 +104,11 @@ fun AppNavigation() {
             composable(Screen.Sessions.route) {
                 SessionListScreen(
                     onSessionClick = { sessionId ->
+                        activeSessionId = sessionId
                         navController.navigate(Screen.Chat.createRoute(sessionId))
                     },
                     onNewSession = { sessionId ->
+                        activeSessionId = sessionId
                         navController.navigate(Screen.Chat.createRoute(sessionId)) {
                             popUpTo(Screen.Sessions.route)
                         }
@@ -96,6 +117,7 @@ fun AppNavigation() {
             }
             composable(Screen.Chat.route) { backStackEntry ->
                 val sessionId = backStackEntry.arguments?.getString("sessionId") ?: return@composable
+                LaunchedEffect(sessionId) { activeSessionId = sessionId }
                 ChatScreen(
                     sessionId = sessionId,
                     onBack = { navController.popBackStack() }

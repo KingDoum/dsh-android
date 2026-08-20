@@ -1,0 +1,490 @@
+# 第一轮代码审查报告
+
+**审查日期**: 2025-08-20  
+**审查范围**: DSH Android 原生客户端全量源码（19 个文件 + 协议验证）  
+**服务端协议参考**: DSH 源码 `packages/host/apiproxy/` 中的 `sessions.schema.ts`、`events.schema.ts`、`events.ts`、`rpc.ts`  
+**审查方法**: 逐文件静态分析 + 服务端协议匹配验证 + 竞态/线程安全/生命周期分析
+
+---
+
+## 🔴 严重问题（需立即修复）
+
+### 1. DshEventClient 重连循环导致 WebSocket 无限累积和重复事件流
+
+**文件**: `DshEventClient.kt:97-113`  
+**问题描述**: `reconnectLoop()` 的设计逻辑根本性错误。`connectOnce` 在 WebSocket 建立后立即返回 `true`，但循环在连接成功后**不等待连接断开**，而是直接进入 `delay(calculateBackoff(0))`，然后再次调用 `connectOnce` 打开新连接。旧 WebSocket 从未被关闭。
+
+**关键计算漏洞**: `calculateBackoff(0)` 中 `(0 - 1).coerceAtMost(4)` = `-1`，`1_000L shl -1` 在 JVM 上被掩码为 `1_000L shl 63` = `Long.MIN_VALUE`，再 `coerceAtMost(30_000)` → 最终延迟 30 秒。所以每 30 秒打开一个新 WebSocket，旧的连接永不关闭。
+
+**影响**:
+- WebSocket 文件描述符无限泄漏（每 30 秒 +1）
+- 所有打开的 WebSocket 都接收相同事件流推送 → `tryEmit` 被重复调用 → 事件重复
+- 每个 onMessage 回调都独立解析并推送 → 重复事件可能导致 Compose 列表键冲突崩溃
+- 重复的 `SessionSubscribed` 帧导致 `SessionListViewModel.loadSessions()` 被重复调用
+- 如果在后台运行数小时，可累积数百个 WebSocket 连接
+
+**修复建议**: 重构重连逻辑。`reconnectLoop` 应使用两个嵌套循环：
+```kotlin
+// 外部循环：重连
+while (shouldReconnect.get()) {
+    // 内部循环：阻塞直到连接断开
+    connectOnceAndWaitForClose(request)
+    if (!shouldReconnect.get()) break
+    delay(calculateBackoff(attempt++))
+}
+```
+`connectOnceAndWaitForClose` 应只在 `onClosed`/`onFailure` 时恢复 continuation，而非在 `onOpen` 时立即恢复。
+
+---
+
+### 2. isSending 在发送成功路径上永不重置
+
+**文件**: `ChatViewModel.kt:48-65`  
+**问题描述**: `sendMessage()` 成功路径（`api?.sendMessage(...)` 正常返回）后**没有将 `isSending` 重置为 `false`**。只有异常路径设置了 `isSending = false`。
+
+**影响**:
+- 用户发送第一条消息后，`isSending` 永远为 `true`
+- `InputBar` 的发送按钮被禁用（`enabled = value.isNotBlank() && !isSending`）
+- `cancelGeneration` 也不重置 `isSending`
+- 没有任何事件处理路径会重置 `isSending`
+- **用户只能发送一条消息，之后输入框永远无法发送** — 这是核心功能阻断
+
+**修复建议**: 在 `sendMessage` 成功路径后立即重置 `isSending`：
+```kotlin
+try {
+    api?.sendMessage(sessionId, content)
+    _uiState.update { it.copy(isSending = false) }
+} catch (e: Exception) {
+    _uiState.update { it.copy(error = ..., isSending = false) }
+}
+```
+或者更好：在收到 `session/subscribed` 或 `session/event` 的 `assistant/message` 时重置。
+
+---
+
+### 3. ChatViewModel 的 observeEvents 在每次 Compose 重组时被重复调用
+
+**文件**: `ChatViewModel.kt:27-32`  
+**文件**: `ChatScreen.kt:45-46`
+
+**问题描述**: `ChatScreen` 中 `apiProvider?.let { api -> viewModel.setApiAndSession(api, sessionId) }` 在**每次 Compose 重组时都会执行**（`remember` 仅缓存了 `apiProvider`，但 `let` 块每次重组都运行）。`setApiAndSession` 没有防御性检查（与 `SessionListViewModel.setApi` 不同），每次调用都：
+1. 无条件调用 `loadHistory()` → 启动新的协程加载历史，与旧的重叠
+2. 无条件调用 `observeEvents()` → 在 `viewModelScope` 中启动新的协程，在 `SharedFlow` 上注册新的 collector
+
+**影响**:
+- 每次键盘弹出、滚动、状态变化（如 `messages` 列表更新）都会触发重组 → 每个重组注册一个新的 collector
+- 多个 collector 同时接收同一事件 → 消息被重复处理（虽然 `id` 去重可以防止视觉重复，但 `update` 原子操作被浪费执行）
+- `loadHistory()` 的重叠调用：后一个协程可能覆盖前一个的结果，且 `isLoading` 状态被反复切换 → 加载指示器闪烁
+- 每个 collector 是 `viewModelScope` 中永不被取消的协程 → 协程泄漏
+- 如果在聊天过程中积累了数十次重组 → 数十个并发 collector
+
+**修复建议**: 
+```kotlin
+fun setApiAndSession(api: DshApi, sessionId: String) {
+    if (this.api === api && this.currentSessionId == sessionId) return
+    this.api = api
+    this.currentSessionId = sessionId
+    loadHistory()
+    observeEvents()
+}
+```
+同时考虑将 `observeEvents` 限制为单次订阅（`isObserving` 标志）。
+
+---
+
+### 4. DshApp._api 懒初始化无同步保护
+
+**文件**: `DshApp.kt:23-38`
+
+**问题描述**: `api` getter 的 `if (_api == null) { ... _api = api }` 没有同步锁或 `@Volatile`。Kotlin 的 `var` 读写不是原子的，两个线程可同时进入 `if` 块。
+
+**影响**:
+- 两个线程同时访问 `DshApp.api` → 两个 `DshApi` 实例被创建
+- 每个实例都有自己的 `DshRpcClient`（独立的 OkHttpClient 和连接池）
+- 每个实例都有自己的 `DshEventClient` → 两个 WebSocket 流连接到同一服务器
+- `appScope.launch { events.connect() }` 被调用两次 → 双重重连循环 → 泄漏加倍
+
+**触发场景**:
+- Compose 首次渲染时主线程访问 `DshApp.api`
+- 同时 `SettingsViewModel.saveServerUrl` 从 IO 线程访问 `DshApp.serverUrl` setter 触发 `_api = null`
+- 即使仅在主线程使用，`DshApp.onCreate` 中 `appScope.launch { events.connect() }` 可能在 IO 线程上启动，而 Compose 在主线程上调用 `DshApp.api`，两者并发
+
+**修复建议**: 使用 `synchronized` 或 `Lazy` 委托：
+```kotlin
+private val _apiLock = Any()
+val api: DshApi? get() = synchronized(_apiLock) {
+    if (_api == null) { ... }
+    _api
+}
+```
+`serverUrl` setter 也应在同一锁下置空 `_api`。
+
+---
+
+### 5. 临时消息 (temp-*) 永久保留，用户消息重复显示
+
+**文件**: `ChatViewModel.kt:52-59, 80-88`
+
+**问题描述**: 乐观更新创建的临时消息（id 以 `temp-` 为前缀）在服务器返回真实 `user/message` 事件后**不会被移除**。消息去重逻辑 `existing.any { it.id == msg.id }` 仅按 id 匹配，而 `temp-xxx` 和服务器分配的 `{realId}` 完全不同。
+
+**影响**:
+- 用户发送消息后立即看到临时消息（正确）
+- 服务器事件推送到达后，真实消息被追加到列表
+- 用户看到**两条自己的消息**（临时 + 真实）
+- 如果有多条消息，每条都加倍
+- 用户看到的消息数量是实际的两倍，且临时消息内容为空或被覆盖
+
+**修复建议**: 在 `eventToMessage` 的 `user/message` 分支中，替换匹配的临时消息：
+```kotlin
+"user/message" -> {
+    val msg = Message(...)
+    _uiState.update { state ->
+        val tempIndex = state.messages.indexOfLast { 
+            it.id.startsWith("temp-") && it.content == msg.content && it.role == MessageRole.User
+        }
+        if (tempIndex >= 0) {
+            state.copy(messages = state.messages.toMutableList().apply { 
+                set(tempIndex, msg) 
+            })
+        } else {
+            state.copy(messages = state.messages + msg)
+        }
+    }
+    null
+}
+```
+
+---
+
+### 6. SharedFlow 无 replay + tryEmit 静默丢弃事件
+
+**文件**: `DshEventClient.kt:58-66`
+
+**问题描述**: `MutableSharedFlow` 配置为 `replay = 0, extraBufferCapacity = 64`，使用 `tryEmit` 而非 `emit`。`tryEmit` 在缓冲区满时返回 `false` 且**不阻塞、不重试**。
+
+**影响**:
+- 当临时订阅者不足（如 Activity 未启动但 WebSocket 已连接）时，所有事件被丢弃且无重放
+- 在流式聊天期间，如果主线程处理慢（Compose 重组、动画），缓冲区（64 个事件）可能被快速填满 → 后续 chunk 事件静默丢失 → 流式内容不完整
+- 事件丢失后无任何告警或恢复机制
+- 应用启动时，WebSocket 可能在 UI 订阅前就收到 `session/subscribed` 和初始事件 → 这些事件被永久丢失
+
+**修复建议**: 方案 A（推荐）：使用 `emit`（挂起背压）而非 `tryEmit`，在 `onMessage` 中切换到协程上下文：
+```kotlin
+override fun onMessage(webSocket: WebSocket, text: String) {
+    scope.launch {
+        parseFrame(text)?.let { _frames.emit(it) }
+    }
+}
+```
+方案 B：增加 `replay` 到 256+ 以覆盖初始连接期的事件，并保留 `tryEmit` 但记录缓冲区溢出告警。
+
+---
+
+## 🟠 中等问题（建议尽快修复）
+
+### 7. SessionListViewModel 对每个 session/event 都全量重载列表
+
+**文件**: `SessionListViewModel.kt:56-65`
+
+**问题描述**: `observeEvents` 中**每一个** `SessionEvent` 帧（无论属于哪个会话）都触发 `loadSessions()` — 完整的 RPC 调用 `session.list`。
+
+**影响**:
+- 在流式对话期间，每个 `assistant/chunk` 事件（每秒可能多个）都触发一次 `session.list` RPC
+- 高频率的 RPC 调用增加服务器负载
+- 列表状态被频繁刷新，可能引起 UI 闪烁
+- 此问题与 WebSocket 重复连接的严重问题叠加后呈指数级放大
+
+**修复建议**: 仅在 `SessionSubscribed` 或 `SessionEvent` 的 `session/title` 事件时刷新，或使用防抖（debounce 500ms）：
+```kotlin
+when (frame) {
+    is RpcModels.MuxFrame.SessionSubscribed -> loadSessions()
+    is RpcModels.MuxFrame.SessionEvent -> {
+        if (frame.event.eventType == "session/title") loadSessions()
+    }
+    else -> {}
+}
+```
+
+---
+
+### 8. ChatScreen 不显示 uiState.error
+
+**文件**: `ChatViewModel.kt:63`  
+**文件**: `ChatScreen.kt:33-144`
+
+**问题描述**: `ChatViewModel` 在 `sendMessage()` 失败时设置了 `error` 字段，但 `ChatScreen` 的 UI 中**没有任何地方渲染 `uiState.error`**（而 `SessionListScreen` 正确渲染了错误）。
+
+**影响**: 用户发送消息失败后完全看不到错误提示。消息发送失败看起来像是"发送成功但助手没回复"。
+
+**修复建议**: 在聊天界面顶部添加 Snackbar 或错误横幅：
+```kotlin
+val error = uiState.error
+if (error != null) {
+    Snackbar(
+        modifier = Modifier.padding(16.dp),
+        action = { TextButton(onClick = { viewModel.clearError() }) { Text("关闭") } }
+    ) { Text(error) }
+}
+```
+
+---
+
+### 9. 流式消息 (assistant/chunk) 内容完全被忽略
+
+**文件**: `RpcModels.kt:266-268`  
+**文件**: `ChatViewModel.kt:95-117`
+
+**问题描述**: `SessionEventParser` 对 `assistant/chunk` 事件仅设置 `isPartial = true`，但 `content` 保持 `null`。`ChatViewModel.eventToMessage` 将 `assistant/chunk` 事件**完全忽略**（不匹配 `user/message`、`assistant/message`、`session/title` 的任何分支，返回 `null`）。
+
+**影响**:
+- 流式输出期间，用户看不到任何增量的文本
+- 最终 `assistant/message` 事件到达时，内容一次性显示
+- 用户看到的是"消息空白很久 → 突然完整回复"的体验
+- 流式打字指示器（`isStreaming` 动画）从未触发，因为 `assistant/message` 的 `isPartial` 基于 `data["interrupted"]`（服务端不发送此字段）
+- 整体流式体验完全缺失
+
+**修复建议**: 需要一个累积器（accumulator）来合并 `assistant/chunk` 事件到当前正在生成的 `assistant` 消息，并实时更新 `content`。
+
+---
+
+### 10. 会话列表标题永远显示"新对话"
+
+**文件**: `DshApi.kt:31-43`  
+**文件**: `SessionListScreen.kt:189-190`
+
+**问题描述**: `session.list` 的响应不包含 `title` 字段（已验证服务端 `sessionSummarySchema` 无 `title`）。客户端将 `title` 硬编码为 `""`，UI 回退显示"新对话"。会话标题通过 `session/title` 事件和 `session/projection` 帧传递，但客户端既不处理投影帧，也不在列表刷新时保留标题。
+
+**影响**: 所有会话在列表中始终显示"新对话"，无法区分不同会话。即使聊天界面标题已从 `session/title` 事件更新，列表仍显示"新对话"。
+
+**修复建议**: 在 `SessionListViewModel` 中维护一个 `sessionId → title` 映射，从 `session/title` 事件更新：
+```kotlin
+private val _titles = mutableMapOf<String, String>()
+// 在 observeEvents 中：
+is RpcModels.MuxFrame.SessionEvent -> {
+    if (frame.event.eventType == "session/title") {
+        frame.event.title?.let { _titles[frame.sessionId] = it }
+    }
+}
+```
+
+---
+
+### 11. 工具审批/问答帧被完全忽略
+
+**文件**: `DshEventClient.kt:161-223`（帧被解析但不被 ViewModel 消费）
+
+**问题描述**: `DshEventClient` 正确解析了 `approval/requested`、`approval/resolved`、`question/requested`、`question/resolved` 帧，但 `SessionListViewModel` 和 `ChatViewModel` 的 `observeEvents` 中都不处理这些帧。
+
+**影响**:
+- 如果服务器配置需要工具审批（默认行为），`approval/requested` 帧到达后无响应 → 代理永远等待审批 → 对话永久卡住
+- 用户无法在界面上审批或拒绝工具调用
+- 问答帧 (`question/requested`) 也被忽略 → 需要用户输入的多轮对话卡住
+- 整个审批/问答功能缺失
+
+**修复建议**: 添加审批和问答的 UI 处理。在 `ChatViewModel` 中添加对 `ApprovalRequested` 和 `QuestionRequested` 帧的处理，并显示相应的审批/问答对话框。
+
+---
+
+### 12. 服务器 URL 变更后旧 EventClient 未断开
+
+**文件**: `DshApp.kt:16-17`  
+**文件**: `SettingsViewModel.kt:29-33`
+
+**问题描述**: `DshApp.serverUrl` setter 将 `_api = null`，但旧 `DshApi` 实例中的 `DshEventClient` 仍在运行，其 WebSocket 仍连接到旧服务器。
+
+**影响**:
+- 旧 `DshEventClient` 的 `reconnectLoop` 持续尝试重连到旧 URL
+- 旧 `DshRpcClient` 的 OkHttpClient 和连接池泄漏
+- 新 API 实例创建并连接到新服务器的同时，旧实例仍在后台运行
+- 每次 URL 变更累积的旧实例越来越多
+
+**修复建议**: 在 `serverUrl` setter 中先关闭旧 API：
+```kotlin
+set(value) {
+    field = value
+    _api?.let { old -> 
+        // 需要 DshApi 暴露 eventClient.disconnect()
+    }
+    _api = null
+}
+```
+
+---
+
+### 13. AppNavigation 底部 Chat Tab 导航可能崩溃
+
+**文件**: `AppNavigation.kt:23-30, 49-50`
+
+**问题描述**: `bottomNavItems` 包含 `Screen.Chat`，其路由为 `"chat/{sessionId}"`。当用户点击底部导航栏的 Chat 标签时，`navController.navigate("chat/{sessionId}")` 被调用，但这是一个**带必需参数的路由模式**，未提供参数值。
+
+**影响**: 在 `navigation-compose 2.7.x` 中，导航到带未填充必需参数的路由可能抛出 `IllegalArgumentException`，导致应用崩溃。即使不崩溃，也会导航到 `sessionId` 为 `null` 的页面。
+
+**修复建议**: 删除 `Screen.Chat` 从底部导航栏，或将其路由改为无参数的 `"chat"` 并显示占位页面。
+
+---
+
+### 14. SettingsViewModel.testConnection 是假测试
+
+**文件**: `SettingsViewModel.kt:36-40`
+
+**问题描述**: `testConnection` 方法直接设置 `isTesting = false, testResult = "连接成功"`，没有发起任何实际网络请求。
+
+**影响**: 用户点击"测试连接"按钮后总是看到"连接成功"，即使服务器地址无效或不可达，给用户虚假的安全感。
+
+**修复建议**: 发起实际的 RPC 调用（如 `session.list`）来验证连接。
+
+---
+
+## 🟡 轻微问题（代码质量/可维护性）
+
+### 15. HostFrame 完全未使用（死代码）
+
+**文件**: `RpcModels.kt:146-189`
+
+**问题描述**: `HostFrame` 密封类及其所有子类型已定义，但客户端仅连接 `/api/events.mux`，从不连接 `/api/events.host`。`HostFrame` 从未被解析或使用。且 wire 类型名与实际服务端不符（如 `"host/session-added"`），如果未来需要实现 host 事件流，需重新验证协议。
+
+**建议**: 移除或注释死代码，或添加注释说明留作未来扩展。
+
+---
+
+### 16. `HistoryEntry` 未使用（死代码）
+
+**文件**: `RpcModels.kt:351-354`
+
+**问题描述**: `HistoryEntry` 数据类已定义但从未在代码中引用。
+
+**建议**: 移除。
+
+---
+
+### 17. isDarkTheme 偏好设置未应用
+
+**文件**: `SettingsViewModel.kt:21-22`
+
+**问题描述**: `SettingsViewModel` 读取 `dark_theme` 偏好并存储在 `isDarkTheme` 中，但 `Theme.kt` 的 `DSHTheme` 使用 `isSystemInDarkTheme()` 而非读取此偏好。
+
+**建议**: 将主题设置流传到 `DSHTheme` 或移除未使用的偏好读取。
+
+---
+
+### 18. LaunchedEffect 中的空动画循环
+
+**文件**: `ChatScreen.kt:214-218`
+
+**问题描述**: `MessageBubble` 中打字指示器三个圆点的 `LaunchedEffect` 块体为空，无任何动画代码。动画点是静态的。
+
+**建议**: 实现实际的透明度/大小脉冲动画，或移除 `LaunchedEffect` 并添加注释。
+
+---
+
+### 19. onRetry 回调在气泡中未渲染
+
+**文件**: `ChatScreen.kt:122-125`
+
+**问题描述**: `MessageBubble` 接收 `onRetry` 回调，但气泡 UI 中没有任何重试按钮或操作入口。回调仅在 `items` 中传递，从未被触发。
+
+**建议**: 为失败的消息添加重试按钮，或移除未使用的参数。
+
+---
+
+### 20. coil-compose 依赖未使用
+
+**文件**: `build.gradle.kts:78`
+
+**问题描述**: `io.coil-kt:coil-compose` 声明的依赖，但项目中没有任何图片加载相关的代码。
+
+**建议**: 移除未使用的依赖。
+
+---
+
+### 21. DshApp.onCreate 主线程读取 SharedPreferences
+
+**文件**: `DshApp.kt:43-44`
+
+**问题描述**: `getSharedPreferences` 的首次调用会从磁盘惰性加载文件，在主线程执行可能触发 `StrictMode` 警告。
+
+**建议**: 使用 `async` 读取，或添加注释说明。
+
+---
+
+### 22. 默认服务器 URL 硬编码（三处重复）
+
+**文件**: `DshApp.kt:14`、`DshApp.kt:44`、`SettingsViewModel.kt:8`
+
+**问题描述**: 默认服务器 URL `https://dsh.113096.xyz:4443` 在三处硬编码。
+
+**建议**: 将默认值提取为顶层常量。
+
+---
+
+### 23. ChatScreen 自动滚动干扰用户手动滚动
+
+**文件**: `ChatScreen.kt:49-53`
+
+**问题描述**: `LaunchedEffect` 在消息变化时强制滚动到底部，用户在阅读历史消息时会被反复拉到底部。
+
+**建议**: 仅在用户已经在底部附近时才自动滚动。
+
+---
+
+### 24. 无错误日志记录
+
+**问题**: 所有异常被 `catch (e: Exception) { set error }` 模式捕获，但没有日志记录。
+
+**建议**: 添加 `Log.e(TAG, ...)` 记录捕获的异常。
+
+---
+
+### 25. SettingsViewModel 不使用 viewModelScope
+
+**文件**: `SettingsViewModel.kt:14-41`
+
+**问题描述**: `SettingsViewModel` 继承 `ViewModel` 但从未使用 `viewModelScope`。
+
+**建议**: 移除 `ViewModel` 继承或使用 `viewModelScope` 包装异步操作。
+
+---
+
+## 📊 总结
+
+### 整体评价
+
+该客户端代码表现出清晰的架构意识（分层清晰、RPC/Event 分离、ViewModel 范式正确），但存在若干**影响核心功能的严重缺陷**，主要集中在三个方面：
+
+1. **WebSocket 生命周期管理**（严重 #1, #4, #12）：重连逻辑有根本性设计缺陷，导致连接泄漏、事件重复、资源泄漏。这是最需要优先修复的问题。
+
+2. **消息发送状态管理**（严重 #2, #3, #5, #8, #9）：`isSending` 从未重置导致只能发送一条消息、`observeEvents` 重复注册、临时消息不替换 — 这些共同导致聊天功能基本不可用。
+
+3. **协议功能覆盖**（中等 #7, #10, #11, #12）：审批/问答、流式展示、会话标题、host 事件等 DSH 协议的关键功能未实现，导致客户端体验远未达到 DSH Web 客户端的能力。
+
+### 建议修复优先级
+
+| 优先级 | 问题 | 预估工作量 | 影响面 |
+|--------|------|----------|--------|
+| **P0** | #1 重连逻辑重写 | 2 天 | 崩溃/泄漏/重复事件 |
+| **P0** | #2 isSending 生命周期 | 0.5 天 | 无法发送第二条消息 |
+| **P0** | #3 observeEvents 重复注册 | 1 天 | 消息重复/协程泄漏 |
+| **P0** | #5 临时消息替换 | 0.5 天 | 消息重复显示 |
+| **P1** | #6 SharedFlow 事件丢失 | 1 天 | 初始事件/流式内容丢失 |
+| **P1** | #4 _api 线程安全 | 0.5 天 | 偶发双连接 |
+| **P1** | #9 流式消息展示 | 3 天 | 流式体验 |
+| **P1** | #11 审批/问答处理 | 3 天 | 代理卡住 |
+| **P2** | #7, #8, #10, #12, #13, #14 | 各有 0.5-1 天 | 功能完整度 |
+| **P3** | #15-#25（代码质量） | 累积 1 天 | 可维护性 |
+
+### 验真摘要
+
+| 验证项 | 结果 |
+|--------|------|
+| 协议匹配（session.list） | ✅ 匹配 — `items: [{sessionId, updatedAt, running, blank, agentPreset, parentSessionId?, origin?, cwd?}]` |
+| 协议匹配（session.history） | ✅ 匹配 — `events: [{event: {type, seq, time, data}, view?}]` |
+| 协议匹配（RPC 信封） | ✅ 匹配 — "client-request" / "server-response" + `result: {ok, value, error}` |
+| 协议匹配（events.mux 帧） | ✅ 匹配 — 所有 10 种 `MuxFrame` 的 type 字段名与 wire 一致 |
+| 协议匹配（session.prompt） | ✅ 匹配 — `{sessionId, mode:"queue", content:[{type:"text", text}]}` |
+| 协议匹配（session.create） | ✅ 匹配 — `{workspaceId?}` → `{sessionId, agentPreset?}` |
+| 协议匹配（session.event 数据） | ⚠️ 部分匹配 — `user/message` 的 id/content 正确；`assistant/chunk` 被解析但不使用；`session/title` 正确 |
+| WebSocket 重连竞态 | ❌ **严重缺陷** — 轮询而非等待断开 |
+| ViewModel 线程安全 | ❌ **严重缺陷** — 重复注册 collector |
+| 内存泄漏 | ❌ **严重风险** — WebSocket 累积 + collector 泄漏 |
+| 敏感信息硬编码 | ⚠️ 服务器 URL 硬编码（非敏感 token） |
+| 生命周期管理 | ❌ URL 变更后旧连接未清理 |

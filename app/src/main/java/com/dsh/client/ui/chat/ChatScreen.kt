@@ -42,8 +42,11 @@ fun ChatScreen(
     val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
 
     // Set API and session
-    val apiProvider = remember { com.dsh.client.DshApp.api }
-    apiProvider?.let { api -> viewModel.setApiAndSession(api, sessionId) }
+    // 只在 sessionId 变化时初始化 ViewModel 的 api/session 绑定
+    LaunchedEffect(sessionId) {
+        val api = com.dsh.client.DshApp.api
+        api?.let { viewModel.setApiAndSession(it, sessionId) }
+    }
 
     // Auto scroll to bottom on new messages
     LaunchedEffect(uiState.messages.size, uiState.messages.lastOrNull()?.content) {
@@ -209,22 +212,7 @@ fun MessageBubble(
                     )
                     if (message.isStreaming) {
                         Spacer(Modifier.height(6.dp))
-                        // Typing indicator
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            repeat(3) { index ->
-                                val delay = index * 150
-                                LaunchedEffect(message.id, delay) {
-                                    // Animated dots
-                                }
-                                Box(
-                                    modifier = Modifier
-                                        .padding(end = 4.dp)
-                                        .size(6.dp)
-                                        .clip(CircleShape)
-                                        .background(StreamingIndicator)
-                                )
-                            }
-                        }
+                        TypingIndicator()
                     }
                 }
             }
@@ -346,5 +334,31 @@ private fun formatMessageTime(timestamp: Long): String {
         java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(timestamp))
     } else {
         java.text.SimpleDateFormat("MM/dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(timestamp))
+    }
+}
+
+
+@Composable
+fun TypingIndicator() {
+    val transition = androidx.compose.animation.core.rememberInfiniteTransition(label = "typing")
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        repeat(3) { index ->
+            val alpha by transition.animateFloat(
+                initialValue = 0.3f,
+                targetValue = 1f,
+                animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+                    animation = androidx.compose.animation.core.tween(400, delayMillis = index * 150),
+                    repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
+                ),
+                label = "dot$index"
+            )
+            Box(
+                modifier = Modifier
+                    .padding(end = 4.dp)
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(StreamingIndicator.copy(alpha = alpha))
+            )
+        }
     }
 }

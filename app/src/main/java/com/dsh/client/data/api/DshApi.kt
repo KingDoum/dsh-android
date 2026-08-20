@@ -8,6 +8,9 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 
@@ -33,7 +36,7 @@ class DshApi(
         return response.items.map { wire ->
             SessionSummary(
                 sessionId = wire.sessionId,
-                title = "",
+                title = extractTitle(wire.projections),
                 updatedAt = wire.updatedAt,
                 running = wire.running,
                 blank = wire.blank,
@@ -111,6 +114,15 @@ class DshApi(
      * Rename a session.
      * RPC: session.rename
      */
+    /** Extract session title from projections.values.title (null-safe). */
+    private fun extractTitle(projections: JsonElement?): String {
+        return try {
+            if (projections == null || projections !is kotlinx.serialization.json.JsonObject) return ""
+            val values = projections["values"]?.jsonObject ?: return ""
+            values["title"]?.jsonPrimitive?.contentOrNull ?: ""
+        } catch (_: Exception) { "" }
+    }
+
     suspend fun renameSession(sessionId: String, title: String) {
         val payload = buildJsonObject {
             put("sessionId", sessionId)
@@ -146,7 +158,8 @@ private data class SessionSummaryWire(
     @SerialName("parentSessionId") val parentSessionId: String? = null,
     @SerialName("origin") val origin: String? = null,
     @SerialName("cwd") val cwd: String? = null,
-    @SerialName("agentPreset") val agentPreset: String? = null
+    @SerialName("agentPreset") val agentPreset: String? = null,
+    @SerialName("projections") val projections: JsonElement? = null
 )
 
 /** session.history response wire shape. */

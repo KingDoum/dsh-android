@@ -17,21 +17,23 @@ class DshApp : Application() {
                 _api = null
             }
 
-        private var _api: DshApi? = null
+        @Volatile private var _api: DshApi? = null
         private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
         val api: DshApi?
             get() {
-                if (_api == null) {
-                    try {
-                        val rpc = DshRpcClient { "$serverUrl/api" }
-                        val events = DshEventClient { serverUrl }
-                        // Start event stream in background
-                        appScope.launch { events.connect() }
-                        val api = DshApi(rpc, events)
-                        _api = api
-                    } catch (e: Exception) {
-                        return null
+                _api?.let { return it }
+                synchronized(this) {
+                    if (_api == null) {
+                        try {
+                            val rpc = DshRpcClient { "$serverUrl/api" }
+                            val events = DshEventClient { serverUrl }
+                            // Start event stream in background
+                            appScope.launch { events.connect() }
+                            _api = DshApi(rpc, events)
+                        } catch (e: Exception) {
+                            return null
+                        }
                     }
                 }
                 return _api

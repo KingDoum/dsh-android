@@ -23,8 +23,10 @@ class ChatViewModel : ViewModel() {
 
     private var api: DshApi? = null
     private var currentSessionId: String? = null
+    private val _pendingReplacements = mutableMapOf<String, String>()
 
     fun setApiAndSession(api: DshApi, sessionId: String) {
+        if (this.api === api && this.currentSessionId == sessionId) return
         this.api = api
         this.currentSessionId = sessionId
         loadHistory()
@@ -49,17 +51,22 @@ class ChatViewModel : ViewModel() {
         if (content.isBlank() || _uiState.value.isSending) return
         val sessionId = currentSessionId ?: return
         viewModelScope.launch {
+            val tempId = "temp-${System.currentTimeMillis()}"
             val tempMsg = Message(
-                id = "temp-${System.currentTimeMillis()}",
+                id = tempId,
                 role = MessageRole.User,
                 content = content,
                 timestamp = System.currentTimeMillis(),
                 isStreaming = false
             )
             _uiState.update { it.copy(isSending = true, messages = it.messages + tempMsg) }
+            // Record pending replacement BEFORE network call (WS may echo before send returns)
+            val sendToken = tempId
+            _pendingReplacements[content] = sendToken
             try {
                 api?.sendMessage(sessionId, content)
             } catch (e: Exception) {
+                _pendingReplacements.remove(content)
                 _uiState.update { it.copy(error = e.message ?: "发送失败", isSending = false) }
             }
         }
@@ -94,13 +101,23 @@ class ChatViewModel : ViewModel() {
 
     private fun eventToMessage(event: RpcModels.SessionEventData): Message? {
         return when (event.eventType) {
-            "user/message" -> Message(
-                id = event.id ?: "u-${event.seq}",
-                role = MessageRole.User,
-                content = extractText(event),
-                timestamp = event.timestamp,
-                isStreaming = false
-            )
+            "user/message" -> {
+                val text = extractText(event)
+                // Check if this replaces a pending optimistic message
+                val tempId = _pendingReplacements.remove(text)
+                if (tempId != null) {
+                    _uiState.update { state ->
+                        state.copy(messages = state.messages.filter { it.id != tempId })
+                    }
+                }
+                Message(
+                    id = event.id ?: "u-${event.seq}",
+                    role = MessageRole.User,
+                    content = text,
+                    timestamp = event.timestamp,
+                    isStreaming = false
+                )
+            }
             "assistant/message" -> Message(
                 id = event.id ?: "a-${event.seq}",
                 role = MessageRole.Assistant,

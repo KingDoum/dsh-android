@@ -57,11 +57,21 @@ class SessionListViewModel : ViewModel() {
         viewModelScope.launch {
             api?.events()?.collect { frame ->
                 when (frame) {
-                    is RpcModels.MuxFrame.SessionSubscribed -> loadSessions()
-                    is RpcModels.MuxFrame.SessionEvent -> loadSessions()
+                    is RpcModels.MuxFrame.SessionEvent -> scheduleRefresh()
                     else -> {}
                 }
             }
+        }
+    }
+
+    // Throttle list refreshes: cooldown 1s between reloads triggered by events
+    private var lastRefreshAt = 0L
+    private fun scheduleRefresh() {
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            if (now - lastRefreshAt < 1000) return@launch
+            lastRefreshAt = now
+            loadSessions()
         }
     }
 }
