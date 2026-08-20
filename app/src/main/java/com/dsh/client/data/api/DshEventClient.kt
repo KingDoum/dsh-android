@@ -57,7 +57,8 @@ class DshEventClient(
 
     private val _frames = MutableSharedFlow<RpcModels.MuxFrame>(
         replay = 0,
-        extraBufferCapacity = 64
+        extraBufferCapacity = 256,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST
     )
 
     /**
@@ -102,25 +103,31 @@ class DshEventClient(
             val effectiveBase = if (base.endsWith("/api")) base else "$base/api"
             val url = "$effectiveBase/events.mux"
             val request = Request.Builder().url(url).build()
+            // connectOnce 挂起直到连接建立或失败；连接成功后继续挂起直到断线
             val connected = connectOnce(request)
+            if (!connected && !shouldReconnect.get()) break
             if (connected) {
                 attempt = 0
                 isConnected.set(true)
-            }
-            if (shouldReconnect.get()) {
+                // 等待断线（connectOnce 在 onClosed/onFailure 时返回）
+                if (!shouldReconnect.get()) break
                 delay(calculateBackoff(attempt))
+            } else {
+                if (shouldReconnect.get()) delay(calculateBackoff(attempt))
             }
         }
     }
 
     private suspend fun connectOnce(request: Request): Boolean =
         suspendCancellableCoroutine { continuation ->
-            val connected = AtomicBoolean(false)
+            // opened=true 表示连接已建立；established 防止重复 resume(true)（断线后的首次 resume）
+            val opened = AtomicBoolean(false)
+            val established = AtomicBoolean(false)
             val wsListener = object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
                     currentWebSocket.set(webSocket)
                     isConnected.set(true)
-                    if (connected.compareAndSet(false, true)) continuation.resume(true)
+                    opened.set(true)
                 }
                 override fun onMessage(webSocket: WebSocket, text: String) {
                     try { parseFrame(text)?.let { _frames.tryEmit(it) } } catch (_: Exception) {}
@@ -131,11 +138,16 @@ class DshEventClient(
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                     isConnected.set(false)
                     currentWebSocket.compareAndSet(webSocket, null)
+                    // 连接已建立过则此处代表正常断线 → resume(true) 触发重连
+                    if (opened.get() && established.compareAndSet(false, true)) continuation.resume(true)
+                    // 连接从未建立（onOpen 未发生）但 closed 到达 — 视为失败
+                    else if (!opened.get() && established.compareAndSet(false, true)) continuation.resume(false)
                 }
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                     isConnected.set(false)
                     currentWebSocket.compareAndSet(webSocket, null)
-                    if (connected.compareAndSet(false, true)) continuation.resume(false)
+                    // 连接建立过 → 断线重连；未建立 → 初始失败
+                    if (established.compareAndSet(false, true)) continuation.resume(opened.get())
                 }
             }
             continuation.invokeOnCancellation { closeCurrentSocket() }

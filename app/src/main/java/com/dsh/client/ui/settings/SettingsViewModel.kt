@@ -2,7 +2,9 @@ package com.dsh.client.ui.settings
 
 import android.content.Context
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
 
 data class SettingsUiState(
     val serverUrl: String = "https://dsh.113096.xyz:4443",
@@ -35,7 +37,17 @@ class SettingsViewModel : ViewModel() {
 
     fun testConnection(context: Context) {
         _uiState.update { it.copy(isTesting = true, testResult = null) }
-        // Test will be done via API call
-        _uiState.update { it.copy(isTesting = false, testResult = "连接成功") }
+        viewModelScope.launch {
+            try {
+                val url = _uiState.value.serverUrl
+                // 用真实 RPC 请求验证连接（session.list 轻量且无需参数）
+                val rpc = com.dsh.client.data.api.DshRpcClient { "$url/api" }
+                rpc.call<kotlinx.serialization.json.JsonElement>("session.list", kotlinx.serialization.json.buildJsonObject { })
+                _uiState.update { it.copy(isTesting = false, testResult = "连接成功") }
+            } catch (e: Exception) {
+                val msg = (e as? com.dsh.client.data.api.RpcException)?.error?.message ?: (e.message ?: "未知错误")
+                _uiState.update { it.copy(isTesting = false, testResult = "连接失败: $msg") }
+            }
+        }
     }
 }

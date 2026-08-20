@@ -14,7 +14,12 @@ class DshApp : Application() {
     companion object {
         var serverUrl: String = "https://dsh.113096.xyz:4443"
             set(value) {
+                if (field == value) return
                 field = value
+                // 断开旧连接，避免泄漏
+                _api?.let { old ->
+                    old.disconnect()
+                }
                 _api = null
             }
 

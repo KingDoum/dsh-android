@@ -247,8 +247,10 @@ private fun parseInline(text: String): AnnotatedString {
                 text.startsWith("**", i) -> {
                     val end = text.indexOf("**", i + 2)
                     if (end != -1) {
-                        applyOpen("**", SpanStyle(fontWeight = FontWeight.Bold))
-                        i += 2
+                        pushStyle(SpanStyle(fontWeight = FontWeight.Bold))
+                        append(text.substring(i + 2, end))
+                        pop()
+                        i = end + 2
                     } else {
                         append(text[i])
                         i++

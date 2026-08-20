@@ -47,10 +47,12 @@ class DshRpcClient(
         payload: JsonElement? = null
     ): T = withContext(Dispatchers.IO) {
         val rpcId = UUID.randomUUID().toString()
+        // 服务端要求 payload 字段必填且为 object：null 会被序列化省略（encodeDefaults=false）
+        val effectivePayload = payload ?: buildJsonObject { }
         val requestBody = RpcModels.RpcRequest(
             rpcId = rpcId,
             method = method,
-            payload = payload
+            payload = effectivePayload
         )
         val httpRequest = Request.Builder()
             .url(apiUrl(method))

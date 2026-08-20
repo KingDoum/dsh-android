@@ -150,6 +150,11 @@ class DshApi(
      * Call [DshEventClient.connect] first to establish the connection.
      */
     fun events(): Flow<RpcModels.MuxFrame> = eventClient.frames
+
+    /** 断开 WebSocket 连接（切换服务器 / 应用退出时调用）。 */
+    fun disconnect() {
+        eventClient.disconnect()
+    }
 }
 
 // ── Wire DTOs (private to this file) ────────────────────────────────────────

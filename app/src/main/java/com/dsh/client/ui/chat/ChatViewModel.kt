@@ -36,13 +36,20 @@ class ChatViewModel : ViewModel() {
     private val streamingBuffer = StreamingMarkdownBuffer()
     private var streamingMsgId: String? = null
 
+    private var eventsJob: kotlinx.coroutines.Job? = null
+
     fun setApiAndSession(api: DshApi, sessionId: String) {
         if (this.api === api && this.currentSessionId == sessionId) return
         this.api = api
         this.currentSessionId = sessionId
         _toolCalls.clear()
+        _pendingReplacements.clear()
         streamingBuffer.reset()
         streamingMsgId = null
+        // 清空旧会话消息，避免切换会话时闪现旧内容
+        _uiState.update { it.copy(messages = emptyList(), isSending = false, sessionTitle = "") }
+        // 取消旧事件订阅，避免 collector 堆积 + 跨会话事件串扰
+        eventsJob?.cancel()
         loadHistory()
         observeEvents()
     }
@@ -103,7 +110,8 @@ class ChatViewModel : ViewModel() {
 
     private fun observeEvents() {
         val sessionId = currentSessionId ?: return
-        viewModelScope.launch {
+        eventsJob?.cancel()
+        eventsJob = viewModelScope.launch {
             api?.events()?.collect { frame ->
                 if (frame is RpcModels.MuxFrame.SessionEvent && frame.sessionId == sessionId) {
                     handleEvent(frame.event)
@@ -119,6 +127,7 @@ class ChatViewModel : ViewModel() {
     }
 
     private fun handleEvent(event: RpcModels.SessionEventData) {
+        // 会话无挂起事件时兜底（如只收到 tool 事件后无文本）：保持 isSending 由 assistant/message 与 finish 控制
         when (event.eventType) {
             "assistant/chunk" -> handleChunk(event)
             "tool/call" -> handleToolCall(event)
@@ -211,9 +220,13 @@ class ChatViewModel : ViewModel() {
                 streamingMsgId?.let { streamingBuffer.reset() }
                 // Don't clear streamingMsgId here — the assistant/message will override/supersede
             }
+            "finish" -> {
+                // 流式结束
+                _uiState.update { it.copy(isSending = false) }
+            }
+            "usage" -> { /* 用量统计，无 UI */ }
             else -> {
-                // usage / finish / reasoning-delta / tool-call-delta — no visible text change for now
-                // tool-call-delta will be followed by a tool/call event
+                // reasoning-delta / tool-call-delta — no visible text change for now
             }
         }
     }
@@ -376,6 +389,8 @@ class ChatViewModel : ViewModel() {
                     streamingMsgId = null
                     streamingBuffer.reset()
                 }
+                // 回复完成 → 结束 isSending
+                _uiState.update { it.copy(isSending = false) }
                 Message(
                     id = event.id ?: "a-${event.seq}",
                     role = MessageRole.Assistant,
