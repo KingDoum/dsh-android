@@ -80,30 +80,3 @@ class DshRpcClient(
     }
 }
 
-class RpcException(val error: RpcModels.RpcError) : Exception(error.message)
-
-@PublishedApi
-internal suspend fun OkHttpClient.executeRequest(request: Request): String =
-    suspendCancellableCoroutine { cont ->
-        val call = newCall(request)
-        cont.invokeOnCancellation { call.cancel() }
-        call.enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                if (cont.isActive) cont.resumeWithException(e)
-            }
-            override fun onResponse(call: Call, response: Response) {
-                response.use { resp ->
-                    if (cont.isActive) {
-                        val body = resp.body?.string() ?: ""
-                        if (resp.isSuccessful) {
-                            cont.resume(body)
-                        } else {
-                            cont.resumeWithException(
-                                IOException("HTTP ${resp.code}: ${resp.message}")
-                            )
-                        }
-                    }
-                }
-            }
-        })
-    }
