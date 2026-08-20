@@ -59,10 +59,14 @@ fun ChatScreen(
         api?.let { viewModel.setApiAndSession(it, sessionId) }
     }
 
-    // Auto scroll to bottom on new messages
+    // Auto scroll to bottom on new messages (only if already near bottom)
     LaunchedEffect(uiState.messages.size, uiState.messages.lastOrNull()?.content) {
-        if (uiState.messages.isNotEmpty()) {
-            listState.animateScrollToItem(uiState.messages.size - 1)
+        if (uiState.messages.isNotEmpty() && !listState.isScrollInProgress) {
+            val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            val total = listState.layoutInfo.totalItemsCount
+            if (lastVisible >= total - 3) {
+                listState.animateScrollToItem(uiState.messages.size - 1)
+            }
         }
     }
 

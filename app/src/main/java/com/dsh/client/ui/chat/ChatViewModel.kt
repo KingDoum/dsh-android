@@ -26,6 +26,7 @@ class ChatViewModel : ViewModel() {
 
     private var api: DshApi? = null
     private var currentSessionId: String? = null
+    // Maps tempId -> content for optimistic message replacement by WS echo
     private val _pendingReplacements = mutableMapOf<String, String>()
 
     // Track tool calls by callId for the current session
@@ -83,12 +84,11 @@ class ChatViewModel : ViewModel() {
             )
             _uiState.update { it.copy(isSending = true, messages = it.messages + tempMsg) }
             // Record pending replacement BEFORE network call (WS may echo before send returns)
-            val sendToken = tempId
-            _pendingReplacements[content] = sendToken
+            _pendingReplacements[tempId] = content
             try {
                 api?.sendMessage(sessionId, content)
             } catch (e: Exception) {
-                _pendingReplacements.remove(content)
+                _pendingReplacements.remove(tempId)
                 _uiState.update { it.copy(error = e.message ?: "发送失败", isSending = false) }
             }
         }
@@ -352,10 +352,11 @@ class ChatViewModel : ViewModel() {
             "user/message" -> {
                 val text = extractText(event)
                 // Check if this replaces a pending optimistic message
-                val tempId = _pendingReplacements.remove(text)
-                if (tempId != null) {
+                val matchedTempId = _pendingReplacements.filter { it.value == text }.keys.firstOrNull()
+                if (matchedTempId != null) {
+                    _pendingReplacements.remove(matchedTempId)
                     _uiState.update { state ->
-                        state.copy(messages = state.messages.filter { it.id != tempId })
+                        state.copy(messages = state.messages.filter { it.id != matchedTempId })
                     }
                 }
                 Message(
