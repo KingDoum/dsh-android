@@ -1,4 +1,4 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@file:Suppress("OPT_IN_USAGE", "EXPERIMENTAL_API_USAGE")
 
 package com.dsh.client.ui.navigation
 
