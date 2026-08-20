@@ -58,7 +58,7 @@ object LocalCache {
 
     fun saveSessions(sessions: List<SessionCache>) {
         val file = sessionsFile() ?: return
-        try { file.writeText(json.encodeToString(SessionList(sessions))) } catch (_: Exception) { }
+        try { file.writeText(json.encodeToString(value = SessionList(sessions))) } catch (_: Exception) { }
     }
 
     fun loadMessages(sessionId: String): List<MessageCache> {
@@ -71,7 +71,7 @@ object LocalCache {
 
     fun saveMessages(sessionId: String, messages: List<MessageCache>) {
         val file = messagesFile(sessionId) ?: return
-        try { file.writeText(json.encodeToString(MessageCacheList(messages))) } catch (_: Exception) { }
+        try { file.writeText(json.encodeToString(value = MessageCacheList(messages))) } catch (_: Exception) { }
     }
 
     fun clearAll() {
