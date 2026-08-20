@@ -1,7 +1,9 @@
 package com.dsh.client.ui.sessionlist
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -15,6 +17,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -23,7 +26,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.dsh.client.domain.model.SessionSummary
 import com.dsh.client.ui.theme.*
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun SessionListScreen(
     onSessionClick: (String) -> Unit,
@@ -31,8 +34,8 @@ fun SessionListScreen(
     viewModel: SessionListViewModel = viewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    var renameDialogSessionId by remember { mutableStateOf<String?>(null) }
 
-    // Get API instance from global provider
     val apiProvider = remember { com.dsh.client.DshApp.api }
     apiProvider?.let { viewModel.setApi(it) }
 
@@ -135,9 +138,13 @@ fun SessionListScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         items(uiState.sessions, key = { it.sessionId }) { session ->
-                            SessionCard(
+                            SwipeableSessionCard(
                                 session = session,
-                                onClick = { onSessionClick(session.sessionId) }
+                                isPinned = viewModel.isPinned(session.sessionId),
+                                onClick = { onSessionClick(session.sessionId) },
+                                onDelete = { viewModel.hideSession(session.sessionId) },
+                                onPin = { viewModel.togglePinSession(session.sessionId) },
+                                onRename = { renameDialogSessionId = session.sessionId }
                             )
                         }
                     }
@@ -145,17 +152,127 @@ fun SessionListScreen(
             }
         }
     }
+
+    // Rename dialog
+    if (renameDialogSessionId != null) {
+        RenameDialog(
+            sessionId = renameDialogSessionId!!,
+            onRename = { newTitle ->
+                viewModel.renameSession(renameDialogSessionId!!, newTitle)
+                renameDialogSessionId = null
+            },
+            onDismiss = { renameDialogSessionId = null }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@Composable
+private fun SwipeableSessionCard(
+    session: SessionSummary,
+    isPinned: Boolean,
+    onClick: () -> Unit,
+    onDelete: () -> Unit,
+    onPin: () -> Unit,
+    onRename: () -> Unit,
+) {
+    var showMenu by remember { mutableStateOf(false) }
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            if (value == SwipeToDismissBoxValue.EndToStart) {
+                onDelete()
+                true
+            } else if (value == SwipeToDismissBoxValue.StartToEnd) {
+                onPin()
+                false // Don't fully dismiss, just toggle pin
+            } else false
+        }
+    )
+
+    SwipeToDismissBox(
+        state = dismissState,
+        backgroundContent = {
+            val color by animateColorAsState(
+                when (dismissState.targetValue) {
+                    SwipeToDismissBoxValue.EndToStart -> AccentRed.copy(alpha = 0.8f)
+                    SwipeToDismissBoxValue.StartToEnd -> AccentBlue.copy(alpha = 0.8f)
+                    else -> Color.Transparent
+                },
+                label = "swipeBg"
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(color)
+                    .padding(horizontal = 20.dp),
+                contentAlignment = when (dismissState.targetValue) {
+                    SwipeToDismissBoxValue.EndToStart -> Alignment.CenterEnd
+                    SwipeToDismissBoxValue.StartToEnd -> Alignment.CenterStart
+                    else -> Alignment.Center
+                }
+            ) {
+                Icon(
+                    imageVector = when (dismissState.targetValue) {
+                        SwipeToDismissBoxValue.EndToStart -> Icons.Filled.Delete
+                        SwipeToDismissBoxValue.StartToEnd -> if (isPinned) Icons.Filled.PushPin else Icons.Outlined.PushPin
+                        else -> Icons.Filled.Delete
+                    },
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        },
+        enableDismissFromStartToEnd = true,
+        enableDismissFromEndToStart = true,
+    ) {
+        // Context menu
+        Box {
+            SessionCard(
+                session = session,
+                isPinned = isPinned,
+                onClick = onClick,
+                onLongClick = { showMenu = true }
+            )
+            DropdownMenu(
+                expanded = showMenu,
+                onDismissRequest = { showMenu = false }
+            ) {
+                DropdownMenuItem(
+                    text = { Text(if (isPinned) "取消置顶" else "置顶") },
+                    onClick = { showMenu = false; onPin() },
+                    leadingIcon = {
+                        Icon(if (isPinned) Icons.Filled.PushPin else Icons.Outlined.PushPin, contentDescription = null)
+                    }
+                )
+                DropdownMenuItem(
+                    text = { Text("重命名") },
+                    onClick = { showMenu = false; onRename() },
+                    leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) }
+                )
+                Divider()
+                DropdownMenuItem(
+                    text = { Text("删除", color = AccentRed) },
+                    onClick = { showMenu = false; onDelete() },
+                    leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null, tint = AccentRed) }
+                )
+            }
+        }
+    }
 }
 
 @Composable
-fun SessionCard(
+private fun SessionCard(
     session: SessionSummary,
-    onClick: () -> Unit
+    isPinned: Boolean = false,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit = {},
 ) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
@@ -172,15 +289,24 @@ fun SessionCard(
                 modifier = Modifier
                     .size(44.dp)
                     .clip(CircleShape)
-                    .background(AccentBlue.copy(alpha = 0.15f)),
+                    .background(if (isPinned) AccentBlue.copy(alpha = 0.25f) else AccentBlue.copy(alpha = 0.15f)),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    Icons.Outlined.SmartToy,
-                    contentDescription = null,
-                    tint = AccentBlue,
-                    modifier = Modifier.size(24.dp)
-                )
+                if (isPinned) {
+                    Icon(
+                        Icons.Filled.PushPin,
+                        contentDescription = "已置顶",
+                        tint = AccentBlue,
+                        modifier = Modifier.size(20.dp)
+                    )
+                } else {
+                    Icon(
+                        Icons.Outlined.SmartToy,
+                        contentDescription = null,
+                        tint = AccentBlue,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
             }
 
             Spacer(Modifier.width(12.dp))
@@ -194,7 +320,6 @@ fun SessionCard(
                     overflow = TextOverflow.Ellipsis,
                     color = MaterialTheme.colorScheme.onSurface
                 )
-                // Last message preview
                 if (session.lastMessagePreview != null) {
                     Spacer(Modifier.height(2.dp))
                     Text(
@@ -232,6 +357,44 @@ fun SessionCard(
             )
         }
     }
+}
+
+@Composable
+private fun RenameDialog(
+    sessionId: String,
+    onRename: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var newTitle by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("重命名会话") },
+        text = {
+            OutlinedTextField(
+                value = newTitle,
+                onValueChange = { newTitle = it },
+                label = { Text("新名称") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    if (newTitle.isNotBlank()) onRename(newTitle.trim())
+                },
+                enabled = newTitle.isNotBlank()
+            ) {
+                Text("确定")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        }
+    )
 }
 
 private val dateFormat = java.text.SimpleDateFormat("MM/dd", java.util.Locale.getDefault())

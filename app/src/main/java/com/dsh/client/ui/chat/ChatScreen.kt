@@ -5,6 +5,12 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideInVertically
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -22,6 +28,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -152,17 +160,24 @@ fun ChatScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MessageBubble(
     message: Message,
     onRetry: () -> Unit = {}
 ) {
     val isUser = message.role == MessageRole.User
+    val clipboardManager = LocalClipboardManager.current
+    var menuExpanded by remember { mutableStateOf(false) }
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 2.dp),
+            .padding(vertical = 2.dp)
+            .combinedClickable(
+                onClick = {},
+                onLongClick = { menuExpanded = true }
+            ),
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
     ) {
         if (!isUser) {
@@ -186,46 +201,85 @@ fun MessageBubble(
             modifier = Modifier.weight(1f, fill = false).widthIn(max = 280.dp),
             horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
         ) {
-            Box(
-                modifier = Modifier
-                    .clip(
-                        RoundedCornerShape(
-                            topStart = 16.dp,
-                            topEnd = 16.dp,
-                            bottomStart = if (isUser) 16.dp else 4.dp,
-                            bottomEnd = if (isUser) 4.dp else 16.dp
-                        )
-                    )
-                    .background(
-                        if (isUser) {
-                            if (message.isStreaming) UserBubble.copy(alpha = 0.7f) else UserBubble
-                        } else {
-                            if (message.isStreaming) AssistantBubble.copy(alpha = 0.8f) else AssistantBubble
-                        }
-                    )
-                    .padding(horizontal = 14.dp, vertical = 10.dp)
+            // 进入动画：fadeIn + 轻微下移
+            AnimatedVisibility(
+                visible = true,
+                enter = fadeIn(animationSpec = tween(300)) + slideInVertically(
+                    animationSpec = tween(300),
+                    initialOffsetY = { it / 4 }
+                )
             ) {
-                Column {
-                    MarkdownText(
-                        text = message.content,
-                        isStreaming = message.isStreaming,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        fontSize = 15.sp
-                    )
-                    if (message.isStreaming) {
-                        Spacer(Modifier.height(4.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "▍",
-                                style = TextStyle(fontSize = 15.sp, color = StreamingIndicator)
+                Box {
+                    Box(
+                        modifier = Modifier
+                            .clip(
+                                RoundedCornerShape(
+                                    topStart = 16.dp,
+                                    topEnd = 16.dp,
+                                    bottomStart = if (isUser) 16.dp else 4.dp,
+                                    bottomEnd = if (isUser) 4.dp else 16.dp
+                                )
                             )
-                            Spacer(Modifier.width(4.dp))
-                            TypingIndicator()
+                            .background(
+                                if (isUser) {
+                                    if (message.isStreaming) UserBubble.copy(alpha = 0.7f) else UserBubble
+                                } else {
+                                    if (message.isStreaming) AssistantBubble.copy(alpha = 0.8f) else AssistantBubble
+                                }
+                            )
+                            .padding(horizontal = 14.dp, vertical = 10.dp)
+                    ) {
+                        Column {
+                            MarkdownText(
+                                text = message.content,
+                                isStreaming = message.isStreaming,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                fontSize = 15.sp
+                            )
+                            if (message.isStreaming) {
+                                Spacer(Modifier.height(4.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = "▍",
+                                        style = TextStyle(fontSize = 15.sp, color = StreamingIndicator)
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    TypingIndicator()
+                                }
+                            }
                         }
+                    }
+
+                    // 长按复制菜单
+                    DropdownMenu(
+                        expanded = menuExpanded,
+                        onDismissRequest = { menuExpanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("复制") },
+                            onClick = {
+                                menuExpanded = false
+                                clipboardManager.setText(AnnotatedString(message.content))
+                            },
+                            leadingIcon = {
+                                Icon(Icons.Filled.ContentCopy, contentDescription = null)
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("重发") },
+                            onClick = {
+                                menuExpanded = false
+                                onRetry()
+                            },
+                            leadingIcon = {
+                                Icon(Icons.Filled.Refresh, contentDescription = null)
+                            }
+                        )
                     }
                 }
             }
 
+            // Timestamp
             Spacer(Modifier.height(4.dp))
             Text(
                 text = formatMessageTime(message.timestamp),

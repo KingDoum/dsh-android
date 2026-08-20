@@ -2,6 +2,7 @@ package com.dsh.client
 
 import android.app.Application
 import com.dsh.client.data.api.DshApi
+import com.dsh.client.data.cache.LocalCache
 import com.dsh.client.data.api.DshEventClient
 import com.dsh.client.data.api.DshRpcClient
 import kotlinx.coroutines.CoroutineScope
@@ -42,6 +43,7 @@ class DshApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        LocalCache.init(this)
         val prefs = getSharedPreferences("dsh_settings", MODE_PRIVATE)
         serverUrl = prefs.getString("server_url", "https://dsh.113096.xyz:4443") ?: "https://dsh.113096.xyz:4443"
     }

@@ -3,6 +3,7 @@ package com.dsh.client.ui.chat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.dsh.client.data.api.DshApi
+import com.dsh.client.data.cache.LocalCache
 import com.dsh.client.data.api.RpcModels
 import com.dsh.client.domain.model.Message
 import com.dsh.client.domain.model.MessageRole
@@ -52,9 +53,18 @@ class ChatViewModel : ViewModel() {
             try {
                 val history = api?.getHistory(sessionId) ?: com.dsh.client.data.api.HistoryResult(emptyList(), false)
                 val messages = historyToMessages(history.events)
+                // Cache: save messages
+                LocalCache.saveMessages(sessionId, messages.map { it.toCache() })
                 _uiState.update { it.copy(messages = messages, isLoading = false) }
             } catch (e: Exception) {
-                _uiState.update { it.copy(isLoading = false, error = e.message ?: "加载失败") }
+                // Try cache
+                val cached = LocalCache.loadMessages(sessionId)
+                if (cached.isNotEmpty()) {
+                    val restored = cached.map { it.toMessage() }
+                    _uiState.update { it.copy(messages = restored, isLoading = false, error = "离线模式") }
+                } else {
+                    _uiState.update { it.copy(isLoading = false, error = e.message ?: "加载失败") }
+                }
             }
         }
     }
@@ -102,6 +112,12 @@ class ChatViewModel : ViewModel() {
         }
     }
 
+    private fun cacheMessages() {
+        val sessionId = currentSessionId ?: return
+        val messages = _uiState.value.messages
+        LocalCache.saveMessages(sessionId, messages.map { it.toCache() })
+    }
+
     private fun handleEvent(event: RpcModels.SessionEventData) {
         when (event.eventType) {
             "assistant/chunk" -> handleChunk(event)
@@ -120,6 +136,7 @@ class ChatViewModel : ViewModel() {
                 }
             }
         }
+        cacheMessages()
     }
 
     private fun handleChunk(event: RpcModels.SessionEventData) {
@@ -389,3 +406,24 @@ class ChatViewModel : ViewModel() {
         }
     }
 }
+
+
+// ── Cache serialization helpers ─────────────────────────────────────────────
+
+private fun Message.toCache() = LocalCache.MessageCache(
+    id = id, role = when (role) {
+        MessageRole.User -> "user"
+        MessageRole.Assistant -> "assistant"
+        MessageRole.System -> "system"
+        MessageRole.Tool -> "tool"
+    }, content = content, timestamp = timestamp, isStreaming = false,
+)
+
+private fun LocalCache.MessageCache.toMessage() = Message(
+    id = id, role = when (role) {
+        "user" -> MessageRole.User
+        "assistant" -> MessageRole.Assistant
+        "system" -> MessageRole.System
+        else -> MessageRole.Tool
+    }, content = content, timestamp = timestamp, isStreaming = false,
+)

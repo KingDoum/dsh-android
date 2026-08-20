@@ -3,6 +3,7 @@ package com.dsh.client.ui.sessionlist
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.dsh.client.data.api.DshApi
+import com.dsh.client.data.cache.LocalCache
 import com.dsh.client.data.api.RpcModels
 import com.dsh.client.domain.model.SessionSummary
 import kotlinx.coroutines.flow.*
@@ -21,8 +22,14 @@ class SessionListViewModel : ViewModel() {
 
     private var api: DshApi? = null
 
-    /** Local cache of last message previews per session. Updated from event stream. Key = sessionId. */
+    /** Locally cached last message previews per session. Updated from event stream. */
     private val _previews = mutableMapOf<String, String>()
+
+    /** Session IDs hidden by the user (local-only deletion). */
+    private val hiddenSessions = mutableSetOf<String>()
+
+    /** Session IDs pinned to the top (local-only pinning). */
+    private val pinnedSessions = mutableSetOf<String>()
 
     fun setApi(api: DshApi) {
         if (this.api === api) return
@@ -36,10 +43,18 @@ class SessionListViewModel : ViewModel() {
             _uiState.update { it.copy(isLoading = true, error = null) }
             try {
                 val sessions = api?.listSessions() ?: emptyList()
-                val merged = mergePreviews(sessions)
-                _uiState.update { it.copy(sessions = merged, isLoading = false, isConnected = true) }
+                // Cache: save to local
+                LocalCache.saveSessions(sessions.map { it.toCache() })
+                _uiState.update { it.copy(sessions = applyLocalModifiers(sessions), isLoading = false, isConnected = true) }
             } catch (e: Exception) {
-                _uiState.update { it.copy(isLoading = false, error = e.message ?: "连接失败", isConnected = false) }
+                // Try cache
+                val cached = LocalCache.loadSessions()
+                if (cached.isNotEmpty()) {
+                    val restored = cached.map { it.toSummary() }
+                    _uiState.update { it.copy(sessions = applyLocalModifiers(restored), isLoading = false, isConnected = false, error = "离线模式") }
+                } else {
+                    _uiState.update { it.copy(isLoading = false, error = e.message ?: "连接失败", isConnected = false) }
+                }
             }
         }
     }
@@ -57,6 +72,44 @@ class SessionListViewModel : ViewModel() {
         }
     }
 
+    fun renameSession(sessionId: String, newTitle: String) {
+        viewModelScope.launch {
+            try {
+                api?.renameSession(sessionId, newTitle)
+            } catch (_: Exception) { }
+        }
+    }
+
+    /** Hide a session from the list (local-only deletion). */
+    fun hideSession(sessionId: String) {
+        hiddenSessions.add(sessionId)
+        _uiState.update { state ->
+            state.copy(sessions = state.sessions.filter { it.sessionId != sessionId })
+        }
+    }
+
+    /** Toggle pin status for a session. */
+    fun togglePinSession(sessionId: String) {
+        if (pinnedSessions.contains(sessionId)) {
+            pinnedSessions.remove(sessionId)
+        } else {
+            pinnedSessions.add(sessionId)
+        }
+        _uiState.update { state ->
+            state.copy(sessions = applyLocalModifiers(state.sessions.toList()))
+        }
+    }
+
+    /** Check if a session is pinned. */
+    fun isPinned(sessionId: String): Boolean = pinnedSessions.contains(sessionId)
+
+    private fun applyLocalModifiers(sessions: List<SessionSummary>): List<SessionSummary> {
+        val merged = mergePreviews(sessions)
+        val filtered = merged.filter { it.sessionId !in hiddenSessions }
+        val (pinned, normal) = filtered.partition { it.sessionId in pinnedSessions }
+        return pinned + normal
+    }
+
     private fun observeEvents() {
         viewModelScope.launch {
             api?.events()?.collect { frame ->
@@ -71,7 +124,6 @@ class SessionListViewModel : ViewModel() {
         }
     }
 
-    /** Merge locally cached previews into the session summaries. */
     private fun mergePreviews(sessions: List<SessionSummary>): List<SessionSummary> {
         return sessions.map { session ->
             val preview = _previews[session.sessionId] ?: session.lastMessagePreview
@@ -79,7 +131,6 @@ class SessionListViewModel : ViewModel() {
         }
     }
 
-    /** Update preview text for a session from a user/assistant message event. */
     private fun updatePreview(sessionId: String, event: RpcModels.SessionEventData) {
         val text = when (event.eventType) {
             "user/message" -> extractPreviewText(event)
@@ -106,7 +157,6 @@ class SessionListViewModel : ViewModel() {
         }
     }
 
-    // Throttle list refreshes: cooldown 1s between reloads triggered by events
     private var lastRefreshAt = 0L
     private fun scheduleRefresh() {
         viewModelScope.launch {
@@ -115,8 +165,22 @@ class SessionListViewModel : ViewModel() {
             lastRefreshAt = now
             try {
                 val sessions = api?.listSessions() ?: emptyList()
-                _uiState.update { it.copy(sessions = mergePreviews(sessions), isConnected = true) }
+                _uiState.update { it.copy(sessions = applyLocalModifiers(sessions), isConnected = true) }
             } catch (_: Exception) { }
         }
     }
 }
+
+
+// ── Cache serialization helpers ─────────────────────────────────────────────
+
+private fun SessionSummary.toCache() = LocalCache.SessionCache(
+    sessionId = sessionId, title = title, updatedAt = updatedAt,
+    agentPreset = agentPreset, lastMessagePreview = lastMessagePreview,
+)
+
+private fun LocalCache.SessionCache.toSummary() = SessionSummary(
+    sessionId = sessionId, title = title, updatedAt = updatedAt,
+    running = false, blank = false, agentPreset = agentPreset,
+    lastMessagePreview = lastMessagePreview,
+)
