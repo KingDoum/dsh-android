@@ -45,6 +45,7 @@ import kotlinx.coroutines.launch
 fun ChatScreen(
     sessionId: String,
     onBack: () -> Unit,
+    isWideScreen: Boolean = false,
     viewModel: ChatViewModel = viewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -118,7 +119,8 @@ fun ChatScreen(
                 state = listState,
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxWidth(),
+                    .fillMaxWidth()
+                    .then(if (isWideScreen) Modifier.widthIn(max = 720.dp).align(Alignment.CenterHorizontally) else Modifier),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
@@ -138,7 +140,8 @@ fun ChatScreen(
                     items(uiState.messages, key = { it.id }) { message ->
                         MessageBubble(
                             message = message,
-                            onRetry = { viewModel.sendMessage(message.content) }
+                            onRetry = { viewModel.sendMessage(message.content) },
+                            isWideScreen = isWideScreen
                         )
                         // Render tool calls for this message
                         message.toolCalls.forEach { toolCall ->
@@ -168,7 +171,8 @@ fun ChatScreen(
 @Composable
 fun MessageBubble(
     message: Message,
-    onRetry: () -> Unit = {}
+    onRetry: () -> Unit = {},
+    isWideScreen: Boolean = false,
 ) {
     val isUser = message.role == MessageRole.User
     val clipboardManager = LocalClipboardManager.current
@@ -202,7 +206,7 @@ fun MessageBubble(
         }
 
         Column(
-            modifier = Modifier.weight(1f, fill = false).widthIn(max = 280.dp),
+            modifier = Modifier.weight(1f, fill = false).widthIn(max = if (isWideScreen) 520.dp else 280.dp),
             horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
         ) {
             // 进入动画：fadeIn + 轻微下移

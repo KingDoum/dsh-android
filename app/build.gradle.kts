@@ -61,6 +61,9 @@ dependencies {
     // Navigation
     implementation("androidx.navigation:navigation-compose:2.7.7")
 
+    // Window size class (adaptive layout)
+    implementation("androidx.compose.material3:material3-window-size-class")
+
     // Core
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.activity:activity-compose:1.8.2")

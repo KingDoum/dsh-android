@@ -450,7 +450,7 @@ private fun RenameDialog(
     )
 }
 
-private val dateFormat = java.text.SimpleDateFormat("MM/dd", java.util.Locale.getDefault())
+private val dateFormat = java.time.format.DateTimeFormatter.ofPattern("MM/dd")
 
 fun formatTime(timestamp: Long): String {
     val now = System.currentTimeMillis()
@@ -460,6 +460,8 @@ fun formatTime(timestamp: Long): String {
         diff < 3_600_000 -> "${diff / 60_000}分钟前"
         diff < 86_400_000 -> "${diff / 3_600_000}小时前"
         diff < 604_800_000 -> "${diff / 86_400_000}天前"
-        else -> dateFormat.format(java.util.Date(timestamp))
+        else -> java.time.Instant.ofEpochMilli(timestamp)
+            .atZone(java.time.ZoneId.systemDefault())
+            .format(dateFormat)
     }
 }

@@ -225,17 +225,30 @@ private fun parseMarkdown(text: String): List<MdBlock> {
 
 private fun parseInline(text: String): AnnotatedString {
     return buildAnnotatedString {
+        // Style stack: each open marker pushes style, close marker pops.
+        // Nested markdown (**bold *italic***) now renders correctly.
+        val styleStack = mutableListOf<Pair<String, SpanStyle>>()
         var i = 0
+        fun applyOpen(marker: String, style: SpanStyle) {
+            pushStyle(style)
+            styleStack.add(marker to style)
+        }
+        fun applyClose(marker: String) {
+            // Find the matching open marker and pop everything above it
+            val idx = styleStack.indexOfLast { it.first == marker }
+            if (idx >= 0) {
+                repeat(styleStack.size - idx) { pop() }
+                repeat(styleStack.size - idx) { styleStack.removeAt(styleStack.size - 1) }
+            }
+        }
         while (i < text.length) {
             when {
                 // **bold**
                 text.startsWith("**", i) -> {
                     val end = text.indexOf("**", i + 2)
                     if (end != -1) {
-                        pushStyle(SpanStyle(fontWeight = FontWeight.Bold))
-                        append(text.substring(i + 2, end))
-                        pop()
-                        i = end + 2
+                        applyOpen("**", SpanStyle(fontWeight = FontWeight.Bold))
+                        i += 2
                     } else {
                         append(text[i])
                         i++
@@ -416,7 +429,7 @@ private fun CodeBlockView(code: String, language: String?) {
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(Color(0xFF1A1A2E))
+            .background(DarkSurface)
             .padding(12.dp)
     ) {
         if (language != null) {
@@ -512,7 +525,7 @@ private fun HorizontalRuleView() {
 private fun TableView(
     headers: List<String>, rows: List<List<String>>, color: Color,
 ) {
-    val headerRow = headers.joinToString(" | ") { "**$it**" }
+    val headerRow = headers.joinToString(" | ") { it }
     val rowTexts = rows.map { row -> row.joinToString(" | ") { it } }
     val tableText = buildString {
         appendLine(headerRow)
