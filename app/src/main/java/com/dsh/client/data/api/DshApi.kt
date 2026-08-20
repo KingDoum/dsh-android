@@ -1,59 +1,44 @@
 package com.dsh.client.data.api
 
 import com.dsh.client.domain.model.SessionSummary
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.map
 
 class DshApi(
-    private val rpcClient: DshRpcClient,
-    private val eventClient: DshEventClient
+    private val rpc: DshRpcClient,
+    val events: DshEventClient
 ) {
     suspend fun listSessions(): List<SessionSummary> {
-        return rpcClient.listSessions().map { json ->
-            // Extract title from projections
-            val title = json.projections?.values?.sessionListMetadata?.let { meta ->
-                if (meta.blank) "" else "会话"
-            } ?: ""
-
+        return rpc.listSessions().map { w ->
             SessionSummary(
-                sessionId = json.sessionId,
-                title = title,
-                updatedAt = json.updatedAt,
-                running = json.running,
-                blank = json.blank,
-                agentPreset = json.agentPreset
+                sessionId = w.sessionId,
+                title = "", // extracted from event stream
+                updatedAt = w.updatedAt,
+                running = w.running,
+                blank = w.blank,
+                agentPreset = w.agentPreset
             )
         }
     }
 
-    suspend fun createSession(workspaceId: String? = null): CreateSessionResult? {
-        val result = rpcClient.createSession(workspaceId)
-        return CreateSessionResult(
-            sessionId = result.sessionId,
-            agentPreset = result.agentPreset
-        )
+    suspend fun createSession(workspaceId: String? = null): CreateSessionResult {
+        val w = rpc.createSession(workspaceId)
+        return CreateSessionResult(w.sessionId, w.agentPreset)
     }
 
     suspend fun getHistory(sessionId: String, beforeSeq: Int? = null, maxMessages: Int? = 50): HistoryResult {
-        val result = rpcClient.getHistory(sessionId, beforeSeq, maxMessages)
-        return HistoryResult(
-            events = result.events.map { it.event },
-            hasMore = result.hasMore
-        )
+        val w = rpc.history(sessionId, beforeSeq, maxMessages)
+        return HistoryResult(w.events.map { it.event }, w.hasMore)
     }
 
     suspend fun sendMessage(sessionId: String, content: String): SendMessageResult {
-        val result = rpcClient.sendMessage(sessionId, content)
-        return SendMessageResult(accepted = result.accepted)
+        val w = rpc.prompt(sessionId, content)
+        return SendMessageResult(w.accepted)
     }
 
     suspend fun cancelSession(sessionId: String) {
-        rpcClient.cancelSession(sessionId)
+        rpc.cancel(sessionId)
     }
 
     suspend fun renameSession(sessionId: String, title: String) {
-        rpcClient.renameSession(sessionId, title)
+        rpc.rename(sessionId, title)
     }
-
-    fun events(): Flow<MuxFrame> = eventClient.events
 }

@@ -10,7 +10,7 @@ class DshApp : Application() {
         var serverUrl: String = "https://dsh.113096.xyz:4443"
             set(value) {
                 field = value
-                _api = null // Force re-create on next access
+                _api = null
             }
 
         private var _api: DshApi? = null
@@ -19,9 +19,10 @@ class DshApp : Application() {
             get() {
                 if (_api == null) {
                     try {
-                        val rpcClient = DshRpcClient { "$serverUrl/api" }
-                        val eventClient = DshEventClient { serverUrl }
-                        _api = DshApi(rpcClient, eventClient)
+                        val rpc = DshRpcClient { "$serverUrl/api" }
+                        val events = DshEventClient { serverUrl }
+                        val api = DshApi(rpc, events)
+                        _api = api
                     } catch (e: Exception) {
                         return null
                     }
@@ -32,7 +33,6 @@ class DshApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        // Load saved server URL
         val prefs = getSharedPreferences("dsh_settings", MODE_PRIVATE)
         serverUrl = prefs.getString("server_url", "https://dsh.113096.xyz:4443") ?: "https://dsh.113096.xyz:4443"
     }

@@ -1,6 +1,5 @@
 package com.dsh.client.ui.sessionlist
 
-import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -28,12 +27,12 @@ import com.dsh.client.ui.theme.*
 @Composable
 fun SessionListScreen(
     onSessionClick: (String) -> Unit,
-    onNewSession: () -> Unit,
+    onNewSession: (String) -> Unit,
     viewModel: SessionListViewModel = viewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
-    // Get API instance from a static provider (set in MainActivity)
+    // Get API instance from global provider
     val apiProvider = remember { com.dsh.client.DshApp.api }
     apiProvider?.let { viewModel.setApi(it) }
 
@@ -62,10 +61,7 @@ fun SessionListScreen(
         },
         floatingActionButton = {
             FloatingActionButton(
-                onClick = {
-                    viewModel.createSession()
-                    onNewSession()
-                },
+                onClick = { viewModel.createSession { id -> onNewSession(id) } },
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary,
                 shape = CircleShape,
@@ -147,16 +143,6 @@ fun SessionListScreen(
                     }
                 }
             }
-
-            // Pull to refresh indicator
-            if (uiState.isLoading && uiState.sessions.isNotEmpty()) {
-                LinearProgressIndicator(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .align(Alignment.TopCenter),
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
         }
     }
 }
@@ -182,7 +168,6 @@ fun SessionCard(
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Profile icon
             Box(
                 modifier = Modifier
                     .size(44.dp)
@@ -237,7 +222,7 @@ fun SessionCard(
     }
 }
 
-private fun formatTime(timestamp: Long): String {
+fun formatTime(timestamp: Long): String {
     val now = System.currentTimeMillis()
     val diff = now - timestamp
     return when {

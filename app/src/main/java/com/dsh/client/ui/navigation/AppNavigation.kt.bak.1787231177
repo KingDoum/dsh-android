@@ -25,6 +25,7 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector,
         fun createRoute(sessionId: String) = "chat/$sessionId"
     }
     data object Settings : Screen("settings", "设置", Icons.Outlined.Settings, Icons.Filled.Settings)
+    data object NewSession : Screen("new_session", "新建", Icons.Outlined.Add, Icons.Filled.Add)
 }
 
 val bottomNavItems = listOf(Screen.Sessions, Screen.Chat, Screen.Settings)
@@ -36,6 +37,7 @@ fun AppNavigation() {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
 
+    // Determine if we're in a chat session
     val isChatScreen = currentDestination?.route == Screen.Chat.route
     val isMainScreen = !isChatScreen
 
@@ -87,10 +89,8 @@ fun AppNavigation() {
                     onSessionClick = { sessionId ->
                         navController.navigate(Screen.Chat.createRoute(sessionId))
                     },
-                    onNewSession = { sessionId ->
-                        navController.navigate(Screen.Chat.createRoute(sessionId)) {
-                            popUpTo(Screen.Sessions.route)
-                        }
+                    onNewSession = {
+                        navController.navigate(Screen.NewSession.route)
                     }
                 )
             }
@@ -103,6 +103,17 @@ fun AppNavigation() {
             }
             composable(Screen.Settings.route) {
                 SettingsScreen()
+            }
+            composable(Screen.NewSession.route) {
+                // Create session and navigate to chat
+                SessionListScreen(
+                    onSessionClick = { sessionId ->
+                        navController.navigate(Screen.Chat.createRoute(sessionId))
+                    },
+                    onNewSession = {
+                        navController.navigate(Screen.NewSession.route)
+                    }
+                )
             }
         }
     }

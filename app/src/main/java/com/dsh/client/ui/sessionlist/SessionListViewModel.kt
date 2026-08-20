@@ -3,7 +3,7 @@ package com.dsh.client.ui.sessionlist
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.dsh.client.data.api.DshApi
-import com.dsh.client.data.api.RpcModels
+import com.dsh.client.data.api.MuxFrame
 import com.dsh.client.domain.model.SessionSummary
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -22,6 +22,7 @@ class SessionListViewModel : ViewModel() {
     private var api: DshApi? = null
 
     fun setApi(api: DshApi) {
+        if (this.api === api) return
         this.api = api
         loadSessions()
         observeEvents()
@@ -39,12 +40,12 @@ class SessionListViewModel : ViewModel() {
         }
     }
 
-    fun createSession() {
+    fun createSession(callback: (String) -> Unit) {
         viewModelScope.launch {
             try {
                 val result = api?.createSession(null)
                 if (result != null) {
-                    loadSessions()
+                    callback(result.sessionId)
                 }
             } catch (e: Exception) {
                 _uiState.update { it.copy(error = e.message) }
@@ -54,12 +55,10 @@ class SessionListViewModel : ViewModel() {
 
     private fun observeEvents() {
         viewModelScope.launch {
-            api?.events()?.collect { frame ->
+            api?.events?.events?.collect { frame ->
                 when (frame) {
-                    is RpcModels.MuxFrame.SessionSubscribed -> {
-                        // Session state changed, refresh list
-                        loadSessions()
-                    }
+                    is MuxFrame.SessionSubscribed -> loadSessions()
+                    is MuxFrame.SessionEvent -> loadSessions()
                     else -> {}
                 }
             }

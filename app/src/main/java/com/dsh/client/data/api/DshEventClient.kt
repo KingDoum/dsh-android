@@ -17,145 +17,113 @@ class DshEventClient(
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(0, TimeUnit.SECONDS) // No timeout for streaming
+        .readTimeout(0, TimeUnit.SECONDS)
         .writeTimeout(10, TimeUnit.SECONDS)
         .build()
 
-    private val _events = MutableSharedFlow<MuxFrame>(replay = 0, extraBufferCapacity = 64)
+    private val _events = MutableSharedFlow<MuxFrame>(replay = 0, extraBufferCapacity = 128)
     val events: SharedFlow<MuxFrame> = _events.asSharedFlow()
 
-    private var webSocket: WebSocket? = null
-    private var connectingJob: Job? = null
-    private var scope: CoroutineScope? = null
+    private var ws: WebSocket? = null
+    private var job: Job? = null
 
-    fun connect(scope: CoroutineScope) {
-        this.scope = scope
-        connectingJob = scope.launch {
-            connectWithRetry()
-        }
-    }
-
-    private suspend fun connectWithRetry() {
-        var retryCount = 0
-        while (isActive) {
-            try {
-                connectOnce()
-                // If connection drops, reset retry
-                retryCount = 0
-            } catch (e: Exception) {
-                if (!isActive) break
-                retryCount++
-                val delay = minOf(1000L * (1 shl minOf(retryCount, 5)), 30_000L)
-                delay(delay)
+    fun start(scope: CoroutineScope) {
+        job = scope.launch {
+            var retries = 0
+            while (isActive) {
+                try {
+                    connect()
+                    retries = 0
+                } catch (_: CancellationException) {
+                    break
+                } catch (e: Exception) {
+                    retries++
+                    val delay = minOf(1000L * (1 shl minOf(retries, 5)), 30_000L)
+                    delay(delay)
+                }
             }
         }
     }
 
-    private fun connectOnce() {
-        val url = "${serverUrlProvider().trimEnd('/')}/events.mux"
-        val request = okhttp3.Request.Builder()
-            .url(url)
-            .header("Content-Type", "application/json")
+    fun stop() {
+        ws?.close(1000, "client closing")
+        ws = null
+        job?.cancel()
+        job = null
+    }
+
+    private fun connect() {
+        val request = Request.Builder()
+            .url("${serverUrlProvider().trimEnd('/')}/events.mux")
             .build()
 
-        val latch = CompletableDeferred<Unit>()
+        val connected = CompletableDeferred<Unit>()
 
-        webSocket = client.newWebSocket(request, object : WebSocketListener() {
-            override fun onOpen(webSocket: WebSocket, response: Response) {
-                latch.complete(Unit)
-                // Send subscribe request
-                val subscribeJson = buildJsonObject {
+        ws = client.newWebSocket(request, object : WebSocketListener() {
+            override fun onOpen(ws: WebSocket, response: Response) {
+                connected.complete(Unit)
+                // Subscribe
+                val sub = buildJsonObject {
                     put("type", "client-request")
                     put("rpcId", java.util.UUID.randomUUID().toString())
                     put("method", "events.mux")
-                    put("payload", buildJsonObject {
-                        put("since", buildJsonObject {})
-                    })
+                    put("payload", buildJsonObject {})
                 }
-                webSocket.send(json.encodeToString(JsonElement.serializer(), subscribeJson))
+                ws.send(json.encodeToString(JsonElement.serializer(), sub))
             }
 
-            override fun onMessage(webSocket: WebSocket, text: String) {
+            override fun onMessage(ws: WebSocket, text: String) {
                 try {
-                    val element = json.parseToJsonElement(text)
-                    val obj = element.jsonObject
-                    val type = obj["type"]?.jsonPrimitive?.contentOrNull ?: return
+                    val obj = json.parseToJsonElement(text).jsonObject
+                    val msgType = obj["type"]?.jsonPrimitive?.contentOrNull ?: return
+                    if (msgType != "server-request") return
 
-                    when (type) {
-                        "server-response" -> {
-                            // Response to our subscription request
-                        }
-                        "server-request" -> {
-                            val method = obj["method"]?.jsonPrimitive?.contentOrNull ?: return
-                            val payload = obj["payload"]?.jsonObject ?: return
-                            val rpcId = obj["rpcId"]?.jsonPrimitive?.contentOrNull ?: return
+                    val method = obj["method"]?.jsonPrimitive?.contentOrNull ?: return
+                    if (method != "events.mux") return
 
-                            when (method) {
-                                "events.mux" -> {
-                                    val frameType = payload["type"]?.jsonPrimitive?.contentOrNull ?: return
-                                    val sessionId = payload["sessionId"]?.jsonPrimitive?.contentOrNull
-                                    val eventData = payload["event"]
+                    val payload = obj["payload"]?.jsonObject ?: return
+                    val frameType = payload["type"]?.jsonPrimitive?.contentOrNull ?: return
+                    val sessionId = payload["sessionId"]?.jsonPrimitive?.contentOrNull
 
-                                    when (frameType) {
-                                        "session/event" -> {
-                                            if (sessionId != null && eventData != null) {
-                                                val event = json.decodeFromJsonElement(
-                                                    SessionEventData.serializer(), eventData
-                                                )
-                                                _events.tryEmit(MuxFrame.SessionEvent(
-                                                    type = "session/event",
-                                                    sessionId = sessionId,
-                                                    event = event
-                                                ))
-                                            }
-                                        }
-                                        "session/subscribed" -> {
-                                            val lastSeq = payload["lastSeq"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
-                                            if (sessionId != null) {
-                                                _events.tryEmit(MuxFrame.SessionSubscribed(
-                                                    sessionId = sessionId,
-                                                    lastSeq = lastSeq
-                                                ))
-                                            }
-                                        }
-                                        "session/queue" -> {
-                                            val items = payload["items"]?.jsonArray ?: JsonArray(emptyList())
-                                            if (sessionId != null) {
-                                                _events.tryEmit(MuxFrame.SessionQueue(
-                                                    sessionId = sessionId,
-                                                    items = items.toList()
-                                                ))
-                                            }
-                                        }
-                                    }
-                                }
+                    when (frameType) {
+                        "session/event" -> {
+                            val eventData = payload["event"] ?: return
+                            val event = json.decodeFromJsonElement(SessionEventWire.serializer(), eventData)
+                            if (sessionId != null) {
+                                _events.tryEmit(MuxFrame.SessionEvent(sessionId, event))
                             }
                         }
+                        "session/subscribed" -> {
+                            val lastSeq = payload["lastSeq"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
+                            if (sessionId != null) {
+                                _events.tryEmit(MuxFrame.SessionSubscribed(sessionId, lastSeq))
+                            }
+                        }
+                        "session/queue" -> {
+                            if (sessionId != null) {
+                                _events.tryEmit(MuxFrame.SessionQueue(sessionId))
+                            }
+                        }
+                        "stream/error" -> {
+                            val msg = payload["error"]?.jsonObject?.get("message")?.jsonPrimitive?.contentOrNull ?: "unknown"
+                            _events.tryEmit(MuxFrame.StreamError(msg))
+                        }
                     }
-                } catch (e: Exception) {
-                    // Parse error, skip frame
+                } catch (_: Exception) { /* skip unparseable frame */ }
+            }
+
+            override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
+                if (!connected.isCompleted) {
+                    connected.completeExceptionally(t)
                 }
             }
 
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                if (!latch.isCompleted) {
-                    latch.completeExceptionally(t ?: Exception("WebSocket connection failed"))
-                }
-            }
-
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+            override fun onClosed(ws: WebSocket, code: Int, reason: String) {
                 // Will reconnect via retry loop
             }
         })
 
-        // Wait for connection or failure
-        runBlocking { latch.await() }
-    }
-
-    fun disconnect() {
-        webSocket?.close(1000, "Client closing")
-        webSocket = null
-        connectingJob?.cancel()
-        connectingJob = null
+        // Block until connected or failed
+        runBlocking { connected.await() }
     }
 }
