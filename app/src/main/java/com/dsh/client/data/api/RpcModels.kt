@@ -327,10 +327,9 @@ object SessionEventParser {
                     val message = data["message"]?.jsonObject
                     val contentArr = message?.get("content")?.jsonArray
                     if (contentArr != null && contentArr.isNotEmpty()) {
-                        val firstBlock = contentArr[0]
-                        val blockObj = if (firstBlock is kotlinx.serialization.json.JsonObject) firstBlock else null
+                        val blockObj = contentArr[0] as? JsonObject
                         toolResult = blockObj?.get("content")?.jsonPrimitive?.contentOrNull
-                        toolIsError = firstBlock["isError"]?.jsonPrimitive?.booleanOrNull ?: false
+                        toolIsError = blockObj?.get("isError")?.jsonPrimitive?.booleanOrNull ?: false
                     }
                 }
                 id = toolCallId

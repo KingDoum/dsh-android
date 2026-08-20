@@ -116,7 +116,7 @@ fun SessionListScreen(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Icon(
-                            if (isPinned) Icons.Filled.Star else Icons.Outlined.SmartToy,
+                            Icons.Outlined.SmartToy,
                             contentDescription = null,
                             modifier = Modifier.size(64.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
