@@ -67,8 +67,9 @@ fun AppNavigation() {
                             onClick = {
                                 // Chat tab only navigates when a session is active
                                 if (screen.route == Screen.Chat.route) {
-                                    if (activeSessionId == null) return@NavigationBarItem
-                                    navController.navigate(Screen.Chat.createRoute(activeSessionId)) {
+                                    val sessionId = activeSessionId
+                                    if (sessionId == null) return@NavigationBarItem
+                                    navController.navigate(Screen.Chat.createRoute(sessionId)) {
                                         popUpTo(navController.graph.findStartDestination().id) {
                                             saveState = true
                                         }

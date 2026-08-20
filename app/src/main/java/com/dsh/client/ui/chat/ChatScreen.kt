@@ -1,5 +1,10 @@
 package com.dsh.client.ui.chat
 
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -340,15 +345,15 @@ private fun formatMessageTime(timestamp: Long): String {
 
 @Composable
 fun TypingIndicator() {
-    val transition = androidx.compose.animation.core.rememberInfiniteTransition(label = "typing")
+    val transition = rememberInfiniteTransition(label = "typing")
     Row(verticalAlignment = Alignment.CenterVertically) {
         repeat(3) { index ->
             val alpha by transition.animateFloat(
                 initialValue = 0.3f,
                 targetValue = 1f,
-                animationSpec = androidx.compose.animation.core.infiniteRepeatable(
-                    animation = androidx.compose.animation.core.tween(400, delayMillis = index * 150),
-                    repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
+                animationSpec = infiniteRepeatable(
+                    animation = tween(400, delayMillis = index * 150),
+                    repeatMode = RepeatMode.Reverse
                 ),
                 label = "dot$index"
             )
