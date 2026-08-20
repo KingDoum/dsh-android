@@ -8,7 +8,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.json.Json
@@ -97,7 +96,7 @@ class DshEventClient(
 
     private suspend fun reconnectLoop() {
         var attempt = 0
-        while (isActive && shouldReconnect.get()) {
+        while (shouldReconnect.get()) {
             attempt++
             val base = serverUrlProvider().trimEnd('/')
             val effectiveBase = if (base.endsWith("/api")) base else "$base/api"

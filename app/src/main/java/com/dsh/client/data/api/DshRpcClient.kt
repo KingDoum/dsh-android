@@ -43,7 +43,7 @@ class DshRpcClient(
         .writeTimeout(30, TimeUnit.SECONDS)
         .build()
 
-    private val jsonMediaType = "application/json".toMediaType()
+    @PublishedApi internal val jsonMediaType = "application/json".toMediaType()
 
     /**
      * Build the full URL for one RPC method.
@@ -52,7 +52,7 @@ class DshRpcClient(
      * ("http://host:3080") or the /api base ("http://host:3080/api");
      * both conventions are normalized.
      */
-    private fun apiUrl(method: String): String {
+    @PublishedApi internal fun apiUrl(method: String): String {
         val base = serverUrlProvider().trimEnd('/')
         val effectiveBase = if (base.endsWith("/api")) base else "$base/api"
         return "$effectiveBase/$method"
@@ -140,7 +140,7 @@ class DshRpcClient(
     /**
      * Execute an OkHttp request as a suspend function.
      */
-    private suspend fun OkHttpClient.executeRequest(request: Request): String =
+    @PublishedApi internal suspend fun OkHttpClient.executeRequest(request: Request): String =
         suspendCancellableCoroutine { continuation ->
             val call = newCall(request)
             continuation.invokeOnCancellation { call.cancel() }
