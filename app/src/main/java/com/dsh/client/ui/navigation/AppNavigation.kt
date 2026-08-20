@@ -1,5 +1,3 @@
-@file:Suppress("OPT_IN_USAGE", "EXPERIMENTAL_API_USAGE")
-
 package com.dsh.client.ui.navigation
 
 import android.content.Context
@@ -8,11 +6,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
-import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
-import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -58,9 +55,9 @@ fun AppNavigation() {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
 
-    // P2-2: 大屏/折叠屏适配 — 宽屏时用侧边导航栏
-    val windowSizeClass = calculateWindowSizeClass(context as android.app.Activity)
-    val isWideScreen = windowSizeClass.widthSizeClass != WindowWidthSizeClass.Compact
+    // P2-2: 大屏/折叠屏适配 — 宽屏(≥600dp)时用侧边导航栏
+    val configuration = LocalConfiguration.current
+    val isWideScreen = configuration.screenWidthDp >= 600
 
     val isChatScreen = currentDestination?.route == Screen.Chat.route
     val isMainScreen = !isChatScreen
