@@ -215,7 +215,7 @@ private fun SwipeableSessionCard(
                 Icon(
                     imageVector = when (dismissState.targetValue) {
                         SwipeToDismissBoxValue.EndToStart -> Icons.Filled.Delete
-                        SwipeToDismissBoxValue.StartToEnd -> if (isPinned) Icons.Filled.PushPin else Icons.Outlined.PushPin
+                        SwipeToDismissBoxValue.StartToEnd -> if (isPinned) Icons.Filled.Star else Icons.Outlined.StarBorder
                         else -> Icons.Filled.Delete
                     },
                     contentDescription = null,
@@ -243,7 +243,7 @@ private fun SwipeableSessionCard(
                     text = { Text(if (isPinned) "取消置顶" else "置顶") },
                     onClick = { showMenu = false; onPin() },
                     leadingIcon = {
-                        Icon(if (isPinned) Icons.Filled.PushPin else Icons.Outlined.PushPin, contentDescription = null)
+                        Icon(if (isPinned) Icons.Filled.Star else Icons.Outlined.StarBorder, contentDescription = null)
                     }
                 )
                 DropdownMenuItem(
@@ -263,6 +263,7 @@ private fun SwipeableSessionCard(
 }
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 private fun SessionCard(
     session: SessionSummary,
     isPinned: Boolean = false,
@@ -294,7 +295,7 @@ private fun SessionCard(
             ) {
                 if (isPinned) {
                     Icon(
-                        Icons.Filled.PushPin,
+                        Icons.Filled.Star,
                         contentDescription = "已置顶",
                         tint = AccentBlue,
                         modifier = Modifier.size(20.dp)
