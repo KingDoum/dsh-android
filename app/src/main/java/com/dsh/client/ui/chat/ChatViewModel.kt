@@ -3,13 +3,11 @@ package com.dsh.client.ui.chat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.dsh.client.data.api.DshApi
-import com.dsh.client.data.api.MuxFrame
-import com.dsh.client.data.api.SessionEventWire
+import com.dsh.client.data.api.RpcModels
 import com.dsh.client.domain.model.Message
 import com.dsh.client.domain.model.MessageRole
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.*
 
 data class ChatUiState(
     val messages: List<Message> = emptyList(),
@@ -77,8 +75,8 @@ class ChatViewModel : ViewModel() {
     private fun observeEvents() {
         val sessionId = currentSessionId ?: return
         viewModelScope.launch {
-            api?.events?.events?.collect { frame ->
-                if (frame is MuxFrame.SessionEvent && frame.sessionId == sessionId) {
+            api?.events()?.collect { frame ->
+                if (frame is RpcModels.MuxFrame.SessionEvent && frame.sessionId == sessionId) {
                     eventToMessage(frame.event)?.let { msg ->
                         _uiState.update { state ->
                             val existing = state.messages
@@ -94,8 +92,8 @@ class ChatViewModel : ViewModel() {
         }
     }
 
-    private fun eventToMessage(event: SessionEventWire): Message? {
-        return when (event.type) {
+    private fun eventToMessage(event: RpcModels.SessionEventData): Message? {
+        return when (event.eventType) {
             "user/message" -> Message(
                 id = event.id ?: "u-${event.seq}",
                 role = MessageRole.User,
@@ -111,37 +109,24 @@ class ChatViewModel : ViewModel() {
                 isStreaming = event.isPartial ?: false
             )
             "session/title" -> {
-                event.title?.let { _uiState.update { it.copy(sessionTitle = event.title) } }
+                event.title?.let { _uiState.update { state -> state.copy(sessionTitle = it) } }
                 null
             }
             else -> null
         }
     }
 
-    private fun extractText(event: SessionEventWire): String {
+    private fun extractText(event: RpcModels.SessionEventData): String {
         val content = event.content ?: return ""
-        return try {
-            if (content is JsonArray) {
-                content.joinToString("") { block ->
-                    val obj = block.jsonObject
-                    if (obj["type"]?.jsonPrimitive?.content == "text") {
-                        obj["text"]?.jsonPrimitive?.contentOrNull ?: ""
-                    } else ""
-                }
-            } else if (content is JsonPrimitive && content.isString) {
-                content.content
-            } else {
-                // Try as array of objects
-                val arr = json.decodeFromJsonElement<JsonArray>(content)
-                arr.joinToString("") { block ->
-                    val obj = block.jsonObject
-                    if (obj["type"]?.jsonPrimitive?.content == "text") {
-                        obj["text"]?.jsonPrimitive?.contentOrNull ?: ""
-                    } else ""
-                }
+        return when (content) {
+            is String -> content
+            is List<*> -> content.joinToString("") { item ->
+                if (item is Map<*, *>) {
+                    val type = item["type"] as? String ?: ""
+                    if (type == "text") (item["text"] as? String) ?: "" else ""
+                } else ""
             }
-        } catch (_: Exception) { "" }
+            else -> ""
+        }
     }
-
-    private val json = Json { ignoreUnknownKeys = true }
 }

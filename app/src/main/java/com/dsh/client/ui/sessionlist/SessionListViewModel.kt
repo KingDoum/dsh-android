@@ -3,7 +3,7 @@ package com.dsh.client.ui.sessionlist
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.dsh.client.data.api.DshApi
-import com.dsh.client.data.api.MuxFrame
+import com.dsh.client.data.api.RpcModels
 import com.dsh.client.domain.model.SessionSummary
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -55,10 +55,10 @@ class SessionListViewModel : ViewModel() {
 
     private fun observeEvents() {
         viewModelScope.launch {
-            api?.events?.events?.collect { frame ->
+            api?.events()?.collect { frame ->
                 when (frame) {
-                    is MuxFrame.SessionSubscribed -> loadSessions()
-                    is MuxFrame.SessionEvent -> loadSessions()
+                    is RpcModels.MuxFrame.SessionSubscribed -> loadSessions()
+                    is RpcModels.MuxFrame.SessionEvent -> loadSessions()
                     else -> {}
                 }
             }

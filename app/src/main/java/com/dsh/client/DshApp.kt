@@ -4,6 +4,10 @@ import android.app.Application
 import com.dsh.client.data.api.DshApi
 import com.dsh.client.data.api.DshEventClient
 import com.dsh.client.data.api.DshRpcClient
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 class DshApp : Application() {
     companion object {
@@ -14,6 +18,7 @@ class DshApp : Application() {
             }
 
         private var _api: DshApi? = null
+        private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
         val api: DshApi?
             get() {
@@ -21,6 +26,8 @@ class DshApp : Application() {
                     try {
                         val rpc = DshRpcClient { "$serverUrl/api" }
                         val events = DshEventClient { serverUrl }
+                        // Start event stream in background
+                        appScope.launch { events.connect() }
                         val api = DshApi(rpc, events)
                         _api = api
                     } catch (e: Exception) {
