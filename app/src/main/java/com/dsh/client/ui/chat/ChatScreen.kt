@@ -154,10 +154,6 @@ fun ChatScreen(
 
 @Composable
 fun MessageBubble(
-                        // Render tool calls for this message
-                        message.toolCalls.forEach { toolCall ->
-                            ToolCallCard(toolCall = toolCall)
-                        }
     message: Message,
     onRetry: () -> Unit = {}
 ) {

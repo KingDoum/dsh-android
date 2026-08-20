@@ -298,7 +298,7 @@ object SessionEventParser {
                 }
                 // For block-end, extract the block text
                 if (chunkType == "block-end") {
-                    val block = chunk["block"]?.jsonObject
+                    val block = chunk?.get("block")?.jsonObject
                     content = block?.get("text")?.jsonPrimitive?.contentOrNull
                 }
             }
