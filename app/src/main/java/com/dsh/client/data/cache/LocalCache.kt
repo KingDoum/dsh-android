@@ -52,26 +52,34 @@ object LocalCache {
         val file = sessionsFile() ?: return emptyList()
         if (!file.exists()) return emptyList()
         return try {
-            json.decodeFromString<SessionList>(file.readText()).items
+            val list = json.decodeFromString(SessionList.serializer(), file.readText())
+            list.items
         } catch (_: Exception) { emptyList() }
     }
 
     fun saveSessions(sessions: List<SessionCache>) {
         val file = sessionsFile() ?: return
-        try { file.writeText(json.encodeToString(value = SessionList(sessions))) } catch (_: Exception) { }
+        try {
+            val text = json.encodeToString(SessionList.serializer(), SessionList(sessions))
+            file.writeText(text)
+        } catch (_: Exception) { }
     }
 
     fun loadMessages(sessionId: String): List<MessageCache> {
         val file = messagesFile(sessionId) ?: return emptyList()
         if (!file.exists()) return emptyList()
         return try {
-            json.decodeFromString<MessageCacheList>(file.readText()).items
+            val list = json.decodeFromString(MessageCacheList.serializer(), file.readText())
+            list.items
         } catch (_: Exception) { emptyList() }
     }
 
     fun saveMessages(sessionId: String, messages: List<MessageCache>) {
         val file = messagesFile(sessionId) ?: return
-        try { file.writeText(json.encodeToString(value = MessageCacheList(messages))) } catch (_: Exception) { }
+        try {
+            val text = json.encodeToString(MessageCacheList.serializer(), MessageCacheList(messages))
+            file.writeText(text)
+        } catch (_: Exception) { }
     }
 
     fun clearAll() {
