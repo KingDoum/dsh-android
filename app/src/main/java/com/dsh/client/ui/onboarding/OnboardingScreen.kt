@@ -42,9 +42,7 @@ fun OnboardingScreen(
         )
     )
 
-    Scaffold(
-        backgroundColor = MaterialTheme.colorScheme.background
-    ) { padding ->
+    Scaffold { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()

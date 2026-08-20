@@ -16,6 +16,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import android.content.Context
+import androidx.compose.ui.platform.LocalContext
 import com.dsh.client.ui.onboarding.OnboardingScreen
 import com.dsh.client.ui.sessionlist.SessionListScreen
 import com.dsh.client.ui.chat.ChatScreen
@@ -37,7 +38,8 @@ val bottomNavItems = listOf(Screen.Sessions, Screen.Chat, Screen.Settings)
 fun AppNavigation() {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("dsh_settings", Context.MODE_PRIVATE) }
-    var showOnboarding by remember { mutableStateOf(prefs.getBoolean("onboarding_done", false)) }
+    val onboardingDone = prefs.getBoolean("onboarding_done", false)
+    var showOnboarding by remember { mutableStateOf(onboardingDone) }
 
     if (!showOnboarding) {
         OnboardingScreen(
