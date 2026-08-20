@@ -10,6 +10,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
@@ -211,7 +212,19 @@ object RpcModels {
         /** Session title (only for session/title events). */
         val title: String? = null,
         /** Whether this is a partial/streaming message (only for assistant/chunk events). */
-        val isPartial: Boolean? = null
+        val isPartial: Boolean? = null,
+        /** Tool call data (for tool/call events). */
+        val toolCallId: String? = null,
+        val toolName: String? = null,
+        val toolArguments: String? = null,
+        /** Tool result data (for tool/result events). */
+        val toolResult: String? = null,
+        val toolIsError: Boolean = false,
+        /** Chunk data (for assistant/chunk events). */
+        val chunkType: String? = null,
+        val chunkText: String? = null,
+        val chunkBlockType: String? = null,
+        val chunkIndex: Int? = null,
     )
 }
 
@@ -248,6 +261,15 @@ object SessionEventParser {
         var content: Any? = null
         var title: String? = null
         var isPartial: Boolean? = null
+        var toolCallId: String? = null
+        var toolName: String? = null
+        var toolArguments: String? = null
+        var toolResult: String? = null
+        var toolIsError = false
+        var chunkType: String? = null
+        var chunkText: String? = null
+        var chunkBlockType: String? = null
+        var chunkIndex: Int? = null
 
         when (eventType) {
             "user/message" -> {
@@ -265,6 +287,20 @@ object SessionEventParser {
 
             "assistant/chunk" -> {
                 isPartial = true
+                val chunk = data["chunk"]?.jsonObject
+                chunkType = chunk?.get("type")?.jsonPrimitive?.contentOrNull
+                chunkText = chunk?.get("text")?.jsonPrimitive?.contentOrNull
+                chunkBlockType = chunk?.get("blockType")?.jsonPrimitive?.contentOrNull
+                chunkIndex = chunk?.get("index")?.jsonPrimitive?.intOrNull
+                // For text-delta, extract chunk text
+                if (chunkType == "text-delta" && chunkText != null) {
+                    content = chunkText
+                }
+                // For block-end, extract the block text
+                if (chunkType == "block-end") {
+                    val block = chunk["block"]?.jsonObject
+                    content = block?.get("text")?.jsonPrimitive?.contentOrNull
+                }
             }
 
             "session/title" -> {
@@ -272,11 +308,31 @@ object SessionEventParser {
             }
 
             "tool/call" -> {
-                id = data["callId"]?.jsonPrimitive?.contentOrNull
+                toolCallId = data["callId"]?.jsonPrimitive?.contentOrNull
+                toolName = data["name"]?.jsonPrimitive?.contentOrNull
+                toolArguments = data["arguments"]?.jsonPrimitive?.contentOrNull
+                id = toolCallId
             }
 
             "tool/result" -> {
-                id = data["callId"]?.jsonPrimitive?.contentOrNull
+                toolCallId = data["callId"]?.jsonPrimitive?.contentOrNull
+                // Also try message.source.callId
+                if (toolCallId == null) {
+                    val message = data["message"]?.jsonObject
+                    val source = message?.get("source")?.jsonObject
+                    toolCallId = source?.get("callId")?.jsonPrimitive?.contentOrNull
+                }
+                // Extract result from message.content[0].content
+                if (toolResult == null) {
+                    val message = data["message"]?.jsonObject
+                    val contentArr = message?.get("content")?.jsonArray
+                    if (contentArr != null && contentArr.isNotEmpty()) {
+                        val firstBlock = contentArr[0].jsonObject
+                        toolResult = firstBlock["content"]?.jsonPrimitive?.contentOrNull
+                        toolIsError = firstBlock["isError"]?.jsonPrimitive?.booleanOrNull ?: false
+                    }
+                }
+                id = toolCallId
             }
         }
 
@@ -287,7 +343,16 @@ object SessionEventParser {
             timestamp = time,
             content = content,
             title = title,
-            isPartial = isPartial
+            isPartial = isPartial,
+            toolCallId = toolCallId,
+            toolName = toolName,
+            toolArguments = toolArguments,
+            toolResult = toolResult,
+            toolIsError = toolIsError,
+            chunkType = chunkType,
+            chunkText = chunkText,
+            chunkBlockType = chunkBlockType,
+            chunkIndex = chunkIndex,
         )
     }
 

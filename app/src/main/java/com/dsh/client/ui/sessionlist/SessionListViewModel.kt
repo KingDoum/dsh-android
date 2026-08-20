@@ -21,6 +21,9 @@ class SessionListViewModel : ViewModel() {
 
     private var api: DshApi? = null
 
+    /** Local cache of last message previews per session. Updated from event stream. Key = sessionId. */
+    private val _previews = mutableMapOf<String, String>()
+
     fun setApi(api: DshApi) {
         if (this.api === api) return
         this.api = api
@@ -33,7 +36,8 @@ class SessionListViewModel : ViewModel() {
             _uiState.update { it.copy(isLoading = true, error = null) }
             try {
                 val sessions = api?.listSessions() ?: emptyList()
-                _uiState.update { it.copy(sessions = sessions, isLoading = false, isConnected = true) }
+                val merged = mergePreviews(sessions)
+                _uiState.update { it.copy(sessions = merged, isLoading = false, isConnected = true) }
             } catch (e: Exception) {
                 _uiState.update { it.copy(isLoading = false, error = e.message ?: "连接失败", isConnected = false) }
             }
@@ -57,10 +61,48 @@ class SessionListViewModel : ViewModel() {
         viewModelScope.launch {
             api?.events()?.collect { frame ->
                 when (frame) {
-                    is RpcModels.MuxFrame.SessionEvent -> scheduleRefresh()
+                    is RpcModels.MuxFrame.SessionEvent -> {
+                        updatePreview(frame.sessionId, frame.event)
+                        scheduleRefresh()
+                    }
                     else -> {}
                 }
             }
+        }
+    }
+
+    /** Merge locally cached previews into the session summaries. */
+    private fun mergePreviews(sessions: List<SessionSummary>): List<SessionSummary> {
+        return sessions.map { session ->
+            val preview = _previews[session.sessionId] ?: session.lastMessagePreview
+            if (preview != null) session.copy(lastMessagePreview = preview) else session
+        }
+    }
+
+    /** Update preview text for a session from a user/assistant message event. */
+    private fun updatePreview(sessionId: String, event: RpcModels.SessionEventData) {
+        val text = when (event.eventType) {
+            "user/message" -> extractPreviewText(event)
+            "assistant/message" -> extractPreviewText(event)
+            else -> return
+        }
+        if (text.isNotBlank()) {
+            val preview = if (text.length > 80) text.take(80) + "..." else text
+            _previews[sessionId] = preview
+        }
+    }
+
+    private fun extractPreviewText(event: RpcModels.SessionEventData): String {
+        val content = event.content ?: return ""
+        return when (content) {
+            is String -> content.trim()
+            is List<*> -> content.joinToString("") { item ->
+                if (item is Map<*, *>) {
+                    val type = item["type"] as? String ?: ""
+                    if (type == "text") (item["text"] as? String) ?: "" else ""
+                } else ""
+            }
+            else -> ""
         }
     }
 
@@ -71,7 +113,10 @@ class SessionListViewModel : ViewModel() {
             val now = System.currentTimeMillis()
             if (now - lastRefreshAt < 1000) return@launch
             lastRefreshAt = now
-            loadSessions()
+            try {
+                val sessions = api?.listSessions() ?: emptyList()
+                _uiState.update { it.copy(sessions = mergePreviews(sessions), isConnected = true) }
+            } catch (_: Exception) { }
         }
     }
 }

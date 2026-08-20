@@ -5,7 +5,6 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -47,7 +46,6 @@ fun ChatScreen(
     val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
 
     // Set API and session
-    // 只在 sessionId 变化时初始化 ViewModel 的 api/session 绑定
     LaunchedEffect(sessionId) {
         val api = com.dsh.client.DshApp.api
         api?.let { viewModel.setApiAndSession(it, sessionId) }
@@ -104,7 +102,6 @@ fun ChatScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            // Messages
             LazyColumn(
                 state = listState,
                 modifier = Modifier
@@ -131,11 +128,14 @@ fun ChatScreen(
                             message = message,
                             onRetry = { viewModel.sendMessage(message.content) }
                         )
+                        // Render tool calls for this message
+                        message.toolCalls.forEach { toolCall ->
+                            ToolCallCard(toolCall = toolCall)
+                        }
                     }
                 }
             }
 
-            // Input bar
             InputBar(
                 value = inputText,
                 onValueChange = { inputText = it },
@@ -154,6 +154,10 @@ fun ChatScreen(
 
 @Composable
 fun MessageBubble(
+                        // Render tool calls for this message
+                        message.toolCalls.forEach { toolCall ->
+                            ToolCallCard(toolCall = toolCall)
+                        }
     message: Message,
     onRetry: () -> Unit = {}
 ) {
@@ -166,7 +170,6 @@ fun MessageBubble(
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
     ) {
         if (!isUser) {
-            // Avatar
             Box(
                 modifier = Modifier
                     .size(32.dp)
@@ -207,22 +210,26 @@ fun MessageBubble(
                     .padding(horizontal = 14.dp, vertical = 10.dp)
             ) {
                 Column {
-                    Text(
+                    MarkdownText(
                         text = message.content,
-                        style = TextStyle(
-                            fontSize = 15.sp,
-                            lineHeight = 21.sp,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
+                        isStreaming = message.isStreaming,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontSize = 15.sp
                     )
                     if (message.isStreaming) {
-                        Spacer(Modifier.height(6.dp))
-                        TypingIndicator()
+                        Spacer(Modifier.height(4.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "▍",
+                                style = TextStyle(fontSize = 15.sp, color = StreamingIndicator)
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            TypingIndicator()
+                        }
                     }
                 }
             }
 
-            // Timestamp
             Spacer(Modifier.height(4.dp))
             Text(
                 text = formatMessageTime(message.timestamp),
@@ -233,7 +240,6 @@ fun MessageBubble(
 
         if (isUser) {
             Spacer(Modifier.width(8.dp))
-            // User avatar
             Box(
                 modifier = Modifier
                     .size(32.dp)
@@ -270,7 +276,6 @@ fun InputBar(
                 .navigationBarsPadding(),
             verticalAlignment = Alignment.Bottom
         ) {
-            // Input field
             BasicTextField(
                 value = value,
                 onValueChange = onValueChange,
@@ -301,7 +306,6 @@ fun InputBar(
 
             Spacer(Modifier.width(8.dp))
 
-            // Send button
             FilledIconButton(
                 onClick = onSend,
                 enabled = value.isNotBlank() && !isSending,
@@ -341,7 +345,6 @@ private fun formatMessageTime(timestamp: Long): String {
         java.text.SimpleDateFormat("MM/dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(timestamp))
     }
 }
-
 
 @Composable
 fun TypingIndicator() {
