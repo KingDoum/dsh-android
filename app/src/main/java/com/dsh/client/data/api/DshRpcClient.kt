@@ -1,0 +1,166 @@
+package com.dsh.client.data.api
+
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.encodeToJsonElement
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.IOException
+import java.util.UUID
+import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+
+/**
+ * HTTP RPC client for DSH's /api/<method> protocol.
+ *
+ * Uses OkHttp to POST JSON-serialized [ClientRequest] frames and parse
+ * [ServerResponse] frames. Each call gets a fresh [rpcId] (UUID).
+ *
+ * @param serverUrlProvider  A lambda that returns the current server base URL
+ *   (e.g. "http://10.0.2.2:3080"). Evaluated on every call to support runtime
+ *   server switching.
+ */
+class DshRpcClient(
+    private val serverUrlProvider: () -> String
+) {
+    /** Shared JSON instance: lenient parsing, ignore unknown keys for forward compatibility. */
+    val json: Json = Json {
+        ignoreUnknownKeys = true
+        isLenient = true
+        encodeDefaults = true
+    }
+
+    /** Shared OkHttp client with sensible timeouts for RPC calls. */
+    private val httpClient: OkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
+        .build()
+
+    private val jsonMediaType = "application/json".toMediaType()
+
+    /**
+     * Execute an RPC call and return the decoded result.
+     *
+     * @param T       The expected result type (must be @Serializable).
+     * @param method  The RPC method name, e.g. "session.list", "session.create".
+     * @param payload Optional JSON payload to send as the request body.
+     * @return The decoded [T] value from the successful response.
+     * @throws RpcException      If the server returned a non-ok result.
+     * @throws TransportException On network/IO errors.
+     */
+    suspend inline fun <reified T> call(
+        method: String,
+        payload: JsonElement? = null
+    ): T = withContext(Dispatchers.IO) {
+        val rpcId = UUID.randomUUID().toString()
+        val requestBody = ClientRequest(
+            rpcId = rpcId,
+            method = method,
+            payload = payload
+        )
+        val bodyJson = json.encodeToJsonElement(requestBody).toString()
+            .toRequestBody(jsonMediaType)
+
+        val httpRequest = Request.Builder()
+            .url("${serverUrlProvider()}/api/$method")
+            .post(bodyJson)
+            .header("Content-Type", "application/json")
+            .build()
+
+        val responseBody = httpClient.executeRequest(httpRequest)
+        val serverResponse = json.decodeFromString<ServerResponse>(responseBody)
+        val result = serverResponse.result
+
+        if (result.ok) {
+            @Suppress("UNCHECKED_CAST")
+            if (result.value != null) {
+                json.decodeFromJsonElement<T>(result.value)
+            } else {
+                // If T is Unit or a nullable type, return null/Unit
+                error("Unexpected null value in successful RPC response for $method")
+            }
+        } else {
+            val error = result.error
+                ?: RpcError("unknown", "No error details in response", null)
+            throw RpcException(error)
+        }
+    }
+
+    /**
+     * Execute an RPC call that returns no meaningful result (Unit).
+     */
+    suspend fun callUnit(
+        method: String,
+        payload: JsonElement? = null
+    ): Unit = withContext(Dispatchers.IO) {
+        val rpcId = UUID.randomUUID().toString()
+        val requestBody = ClientRequest(
+            rpcId = rpcId,
+            method = method,
+            payload = payload
+        )
+        val bodyJson = json.encodeToJsonElement(requestBody).toString()
+            .toRequestBody(jsonMediaType)
+
+        val httpRequest = Request.Builder()
+            .url("${serverUrlProvider()}/api/$method")
+            .post(bodyJson)
+            .header("Content-Type", "application/json")
+            .build()
+
+        val responseBody = httpClient.executeRequest(httpRequest)
+        val serverResponse = json.decodeFromString<ServerResponse>(responseBody)
+        val result = serverResponse.result
+
+        if (!result.ok) {
+            val error = result.error
+                ?: RpcError("unknown", "No error details in response", null)
+            throw RpcException(error)
+        }
+    }
+
+    /**
+     * Execute an OkHttp request as a suspend function using
+     * [suspendCancellableCoroutine].
+     */
+    private suspend fun OkHttpClient.executeRequest(request: Request): String =
+        suspendCancellableCoroutine { continuation ->
+            val call = newCall(request)
+            continuation.invokeOnCancellation { call.cancel() }
+            call.enqueue(object : Callback {
+                override fun onResponse(call: Call, response: okhttp3.Response) {
+                    val body = response.body?.string()
+                    if (response.isSuccessful && body != null) {
+                        continuation.resume(body)
+                    } else {
+                        val status = response.code
+                        val detail = body ?: "no body"
+                        continuation.resumeWithException(
+                            TransportException(
+                                "HTTP $status for ${request.url}: $detail"
+                            )
+                        )
+                    }
+                }
+
+                override fun onFailure(call: Call, e: IOException) {
+                    // Only resume if the continuation is still active
+                    // (not cancelled by invokeOnCancellation)
+                    if (continuation.isActive) {
+                        continuation.resumeWithException(
+                            TransportException("Network error: ${e.message}", e)
+                        )
+                    }
+                }
+            })
+        }
+}
