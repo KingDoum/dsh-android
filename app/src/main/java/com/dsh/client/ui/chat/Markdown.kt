@@ -158,7 +158,7 @@ private fun parseMarkdown(text: String): List<MdBlock> {
         if (line.trimStart().matches(Regex("^[-*+]\\s+.*"))) {
             val items = mutableListOf<String>()
             while (i < lines.size && lines[i].trimStart().matches(Regex("^[-*+]\\s+.*"))) {
-                items.add(lines[i].trimStart().removePrefix(Regex("^[-*+]\\s+")))
+                items.add(lines[i].trimStart().replaceFirst(Regex("^[-*+]\\s+"), ""))
                 i++
             }
             blocks.add(MdBlock.BulletList(items.map { parseInline(it) }))
