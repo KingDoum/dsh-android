@@ -27,6 +27,7 @@ class DshRpcClient(
         ignoreUnknownKeys = true
         isLenient = true
         coerceInputValues = true
+        encodeDefaults = true  // 确保 type:"client-request" 等默认字段被序列化
     }
 
     @PublishedApi internal val httpClient = OkHttpClient.Builder()
