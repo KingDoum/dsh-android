@@ -241,7 +241,7 @@ fun MessageBubble(
                             MarkdownText(
                                 text = message.content,
                                 isStreaming = message.isStreaming,
-                                color = MaterialTheme.colorScheme.onSurface,
+                                color = if (isUser) Color.White else MaterialTheme.colorScheme.onSurface,
                                 fontSize = 15.sp
                             )
                             if (message.isStreaming) {

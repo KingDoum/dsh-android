@@ -119,7 +119,7 @@ class DshApi(
         return try {
             if (projections == null || projections !is kotlinx.serialization.json.JsonObject) return ""
             val values = projections["values"]?.jsonObject ?: return ""
-            values["title"]?.jsonPrimitive?.contentOrNull ?: ""
+            (values["title"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull ?: ""
         } catch (_: Exception) { "" }
     }
 

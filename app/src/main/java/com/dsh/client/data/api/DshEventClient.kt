@@ -178,14 +178,14 @@ class DshEventClient(
 
     private fun parseFrame(text: String): RpcModels.MuxFrame? {
         val root = json.parseToJsonElement(text).jsonObject
-        if (root["type"]?.jsonPrimitive?.contentOrNull != "server-request") return null
+        if ((root["type"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull != "server-request") return null
         val payload = root["payload"]?.jsonObject ?: return null
         return parseMuxFrame(payload)
     }
 
     private fun parseMuxFrame(payload: JsonObject): RpcModels.MuxFrame? {
-        val frameType = payload["type"]?.jsonPrimitive?.contentOrNull ?: return null
-        val sessionId = payload["sessionId"]?.jsonPrimitive?.contentOrNull
+        val frameType = (payload["type"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull ?: return null
+        val sessionId = (payload["sessionId"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
         return when (frameType) {
             "session/event" -> {
                 val eventObj = payload["event"]?.jsonObject ?: return null
@@ -197,19 +197,19 @@ class DshEventClient(
             }
             "session/subscribed" -> RpcModels.MuxFrame.SessionSubscribed(
                 sessionId = sessionId ?: return null,
-                lastSeq = payload["lastSeq"]?.jsonPrimitive?.intOrNull ?: 0
+                lastSeq = (payload["lastSeq"] as? kotlinx.serialization.json.JsonPrimitive)?.intOrNull ?: 0
             )
             "approval/requested" -> RpcModels.MuxFrame.ApprovalRequested(
                 sessionId = sessionId ?: return null,
-                approvalId = payload["approvalId"]?.jsonPrimitive?.contentOrNull ?: "",
-                toolName = payload["toolName"]?.jsonPrimitive?.contentOrNull ?: "",
-                callId = payload["callId"]?.jsonPrimitive?.contentOrNull,
-                reason = payload["reason"]?.jsonPrimitive?.contentOrNull
+                approvalId = (payload["approvalId"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull ?: "",
+                toolName = (payload["toolName"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull ?: "",
+                callId = (payload["callId"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull,
+                reason = (payload["reason"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
             )
             "approval/resolved" -> RpcModels.MuxFrame.ApprovalResolved(
                 sessionId = sessionId ?: return null,
-                approvalId = payload["approvalId"]?.jsonPrimitive?.contentOrNull ?: "",
-                outcome = payload["outcome"]?.jsonPrimitive?.contentOrNull ?: ""
+                approvalId = (payload["approvalId"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull ?: "",
+                outcome = (payload["outcome"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull ?: ""
             )
             "question/requested" -> RpcModels.MuxFrame.QuestionRequested(
                 sessionId = sessionId ?: return null,
@@ -217,8 +217,8 @@ class DshEventClient(
             )
             "question/resolved" -> RpcModels.MuxFrame.QuestionResolved(
                 sessionId = sessionId ?: return null,
-                questionRpcId = payload["questionRpcId"]?.jsonPrimitive?.contentOrNull ?: "",
-                outcome = payload["outcome"]?.jsonPrimitive?.contentOrNull ?: ""
+                questionRpcId = (payload["questionRpcId"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull ?: "",
+                outcome = (payload["outcome"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull ?: ""
             )
             "session/queue" -> RpcModels.MuxFrame.SessionQueue(
                 sessionId = sessionId ?: return null,
@@ -230,16 +230,16 @@ class DshEventClient(
             )
             "session/projection" -> RpcModels.MuxFrame.SessionProjection(
                 sessionId = sessionId ?: return null,
-                key = payload["key"]?.jsonPrimitive?.contentOrNull ?: "",
+                key = (payload["key"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull ?: "",
                 value = payload["value"] ?: JsonNull,
-                seq = payload["seq"]?.jsonPrimitive?.intOrNull ?: 0
+                seq = (payload["seq"] as? kotlinx.serialization.json.JsonPrimitive)?.intOrNull ?: 0
             )
             "stream/error" -> {
                 val err = payload["error"]?.jsonObject
                 RpcModels.MuxFrame.StreamError(
                     error = RpcModels.RpcError(
-                        code = err?.get("code")?.jsonPrimitive?.contentOrNull ?: "internal",
-                        message = err?.get("message")?.jsonPrimitive?.contentOrNull ?: "",
+                        code = (err?.get("code") as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull ?: "internal",
+                        message = (err?.get("message") as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull ?: "",
                         details = err?.get("details")?.jsonObject
                     )
                 )

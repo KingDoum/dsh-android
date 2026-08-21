@@ -251,9 +251,9 @@ object SessionEventParser {
      * @return A flattened [RpcModels.SessionEventData] for UI consumption.
      */
     fun parse(eventObj: JsonObject): RpcModels.SessionEventData {
-        val eventType = eventObj["type"]?.jsonPrimitive?.contentOrNull ?: "unknown"
-        val seq = eventObj["seq"]?.jsonPrimitive?.intOrNull ?: 0
-        val time = eventObj["time"]?.jsonPrimitive?.longOrNull
+        val eventType = (eventObj["type"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull ?: "unknown"
+        val seq = (eventObj["seq"] as? kotlinx.serialization.json.JsonPrimitive)?.intOrNull ?: 0
+        val time = (eventObj["time"] as? kotlinx.serialization.json.JsonPrimitive)?.longOrNull
             ?: System.currentTimeMillis()
         val data = eventObj["data"]?.jsonObject ?: JsonObject(emptyMap())
 
@@ -273,25 +273,25 @@ object SessionEventParser {
 
         when (eventType) {
             "user/message" -> {
-                id = data["id"]?.jsonPrimitive?.contentOrNull
+                id = (data["id"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
                 content = data["content"]?.let { jsonContentToAny(it) }
             }
 
             "assistant/message" -> {
                 val message = data["message"]?.jsonObject
-                id = message?.get("id")?.jsonPrimitive?.contentOrNull
+                id = (message?.get("id") as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
                 content = message?.get("content")?.let { jsonContentToAny(it) }
-                isPartial = data["interrupted"]?.jsonPrimitive?.booleanOrNull
+                isPartial = (data["interrupted"] as? kotlinx.serialization.json.JsonPrimitive)?.booleanOrNull
                     ?: false
             }
 
             "assistant/chunk" -> {
                 isPartial = true
                 val chunk = data["chunk"]?.jsonObject
-                chunkType = chunk?.get("type")?.jsonPrimitive?.contentOrNull
-                chunkText = chunk?.get("text")?.jsonPrimitive?.contentOrNull
-                chunkBlockType = chunk?.get("blockType")?.jsonPrimitive?.contentOrNull
-                chunkIndex = chunk?.get("index")?.jsonPrimitive?.intOrNull
+                chunkType = (chunk?.get("type") as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
+                chunkText = (chunk?.get("text") as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
+                chunkBlockType = (chunk?.get("blockType") as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
+                chunkIndex = (chunk?.get("index") as? kotlinx.serialization.json.JsonPrimitive)?.intOrNull
                 // For text-delta, extract chunk text
                 if (chunkType == "text-delta" && chunkText != null) {
                     content = chunkText
@@ -299,28 +299,28 @@ object SessionEventParser {
                 // For block-end, extract the block text
                 if (chunkType == "block-end") {
                     val block = chunk?.get("block")?.jsonObject
-                    content = block?.get("text")?.jsonPrimitive?.contentOrNull
+                    content = (block?.get("text") as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
                 }
             }
 
             "session/title" -> {
-                title = data["title"]?.jsonPrimitive?.contentOrNull
+                title = (data["title"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
             }
 
             "tool/call" -> {
-                toolCallId = data["callId"]?.jsonPrimitive?.contentOrNull
-                toolName = data["name"]?.jsonPrimitive?.contentOrNull
-                toolArguments = data["arguments"]?.jsonPrimitive?.contentOrNull
+                toolCallId = (data["callId"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
+                toolName = (data["name"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
+                toolArguments = (data["arguments"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
                 id = toolCallId
             }
 
             "tool/result" -> {
-                toolCallId = data["callId"]?.jsonPrimitive?.contentOrNull
+                toolCallId = (data["callId"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
                 // Also try message.source.callId
                 if (toolCallId == null) {
                     val message = data["message"]?.jsonObject
                     val source = message?.get("source")?.jsonObject
-                    toolCallId = source?.get("callId")?.jsonPrimitive?.contentOrNull
+                    toolCallId = (source?.get("callId") as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
                 }
                 // Extract result from message.content[0].content
                 if (toolResult == null) {
@@ -328,8 +328,8 @@ object SessionEventParser {
                     val contentArr = message?.get("content")?.jsonArray
                     if (contentArr != null && contentArr.isNotEmpty()) {
                         val blockObj = contentArr[0] as? JsonObject
-                        toolResult = blockObj?.get("content")?.jsonPrimitive?.contentOrNull
-                        toolIsError = blockObj?.get("isError")?.jsonPrimitive?.booleanOrNull ?: false
+                        toolResult = (blockObj?.get("content") as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
+                        toolIsError = (blockObj?.get("isError") as? kotlinx.serialization.json.JsonPrimitive)?.booleanOrNull ?: false
                     }
                 }
                 id = toolCallId
